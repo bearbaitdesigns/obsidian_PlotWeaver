@@ -1,0 +1,78 @@
+name: Release
+
+# Publishes a GitHub release with the three files Obsidian and BRAT install:
+# main.js, manifest.json and styles.css.
+#
+# Two ways to run it:
+#   1. Push a tag that matches manifest.json's version, e.g.  git tag 1.0.1 && git push origin 1.0.1
+#   2. Actions tab → Release → "Run workflow": tags and releases the version currently in manifest.json.
+#
+# Tags are bare versions (1.2.0, not v1.2.0), as Obsidian requires.
+# A tag with a suffix (1.2.0-beta.1) is published as a pre-release, which BRAT can install as a beta.
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Work out the version
+        id: version
+        run: |
+          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="${MANIFEST_VERSION}"
+          fi
+          if [ "${TAG}" != "${MANIFEST_VERSION}" ]; then
+            echo "::error::Tag ${TAG} does not match manifest.json version ${MANIFEST_VERSION}. Bump manifest.json first (node scripts/bump.mjs ${TAG})."
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          if [[ "${TAG}" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Validate plugin files
+        run: |
+          node --check main.js
+          node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('versions.json','utf8'))"
+          node -e "
+            const m = require('./manifest.json'), v = require('./versions.json');
+            for (const k of ['id','name','version','minAppVersion','description','author']) if (!m[k]) { console.error('manifest.json is missing ' + k); process.exit(1); }
+            if (!'${{ steps.version.outputs.tag }}'.includes('-') && !v[m.version]) { console.error('versions.json has no entry for ' + m.version); process.exit(1); }
+          "
+          test -s styles.css
+
+      - name: Stop if the release already exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "::error::Release ${{ steps.version.outputs.tag }} already exists. Bump the version to publish a new one."
+            exit 1
+          fi
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          FLAGS="--title ${TAG} --generate-notes --target ${GITHUB_SHA}"
+          if [ "${{ steps.version.outputs.prerelease }}" = "true" ]; then FLAGS="${FLAGS} --prerelease"; fi
+          gh release create "${TAG}" main.js manifest.json styles.css ${FLAGS}
