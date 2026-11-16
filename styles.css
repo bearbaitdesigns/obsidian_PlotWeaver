@@ -352,3 +352,29 @@
 }
 .pw-fs-host > .pw-root { flex: 1; height: 100%; width: 100%; }
 .pw-fs-btn { margin-left: 4px; }
+
+/* ---------- collapsible shelf */
+.pw-shelf-collapse {
+  display: flex; align-items: center; justify-content: center; padding: 0 8px;
+  color: var(--text-faint); cursor: pointer; border-bottom: 2px solid transparent;
+}
+.pw-shelf-collapse:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.pw-shelf-collapse svg { width: 15px; height: 15px; }
+.pw-shelf-rail {
+  width: 44px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 6px 0; border-left: 1px solid var(--background-modifier-border); background: var(--background-secondary);
+}
+.pw-rail-btn, .pw-rail-tab {
+  width: 34px; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 6px 0; border-radius: 6px; color: var(--text-muted); cursor: pointer;
+}
+.pw-rail-btn:hover, .pw-rail-tab:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.pw-rail-btn svg, .pw-rail-tab svg { width: 16px; height: 16px; }
+.pw-rail-tab .pw-count { font-size: 9.5px; padding: 0 5px; }
+.pw-rail-tab.pw-drop-target { background: color-mix(in srgb, var(--interactive-accent) 22%, transparent); color: var(--text-normal); }
+.pw-rail-btn:first-child { margin-bottom: 4px; border-bottom: 1px solid var(--background-modifier-border); border-radius: 6px 6px 0 0; }
+.pw-rail-add { margin-top: 4px; }
+.pw-rail-label {
+  margin-top: 10px; writing-mode: vertical-rl; font-size: 11px; letter-spacing: .06em;
+  color: var(--text-faint); text-transform: uppercase; user-select: none;
+}

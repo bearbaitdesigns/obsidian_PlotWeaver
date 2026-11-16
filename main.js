@@ -25,7 +25,7 @@ const DEFAULT_SETTINGS = {
   addProperties: true,
   fullscreenWindow: true,
 };
-const DEFAULT_UI = { mode: 'board', columns: 'time', shelfTab: 'unplaced', showShelf: true, showArrows: true, showOffscreen: true, povFilter: 'all' };
+const DEFAULT_UI = { mode: 'board', columns: 'time', shelfTab: 'unplaced', shelfCollapsed: false, showArrows: true, showOffscreen: true, povFilter: 'all' };
 
 const SHELF_TABS = [
   { key: 'unplaced', label: 'Unplaced', icon: 'inbox', hint: 'Active ideas not yet placed in story time or a chapter. Drag one onto the board to place it.' },
@@ -845,7 +845,8 @@ class PlotWeaverView extends ItemView {
     const main = body.createDiv('pw-main');
     if (this.ui.mode === 'outline') this.renderOutline(main, n);
     else this.renderBoard(main, n);
-    if (this.ui.showShelf) this.renderShelf(body.createDiv('pw-shelf'), n);
+    if (this.ui.shelfCollapsed) this.renderShelfRail(body.createDiv('pw-shelf-rail'), n);
+    else this.renderShelf(body.createDiv('pw-shelf'), n);
 
     if (this.boardScroller) { this.boardScroller.scrollLeft = keep.bl || 0; this.boardScroller.scrollTop = keep.bt || 0; }
     if (this.outlineScroller) this.outlineScroller.scrollTop = keep.ot || 0;
@@ -901,7 +902,7 @@ class PlotWeaverView extends ItemView {
     pov.onchange = () => this.setUi({ povFilter: pov.value });
     this.tbButton(g2, 'eye-off', 'Off-screen', () => this.setUi({ showOffscreen: !this.ui.showOffscreen }), this.ui.showOffscreen, 'Show off-screen events (board and outline)');
     this.tbButton(g2, 'git-merge', 'Influences', () => this.setUi({ showArrows: !this.ui.showArrows }), this.ui.showArrows, 'Draw cause-and-effect arrows');
-    this.tbButton(g2, 'inbox', 'Shelf', () => this.setUi({ showShelf: !this.ui.showShelf }), this.ui.showShelf, 'Idea shelf: unplaced, saved for later, archive');
+    this.tbButton(g2, 'inbox', 'Shelf', () => this.setUi({ shelfCollapsed: !this.ui.shelfCollapsed }), !this.ui.shelfCollapsed, this.ui.shelfCollapsed ? 'Expand the idea shelf' : 'Collapse the idea shelf');
 
     const g3 = bar.createDiv('pw-tb-group pw-tb-actions');
     this.tbButton(g3, 'plus', 'Idea', () => this.newBeat({}), undefined, 'New event or idea');
@@ -1253,6 +1254,50 @@ class PlotWeaverView extends ItemView {
 
   /* ---------- shelf */
 
+  /** Dropping a card on a shelf tab (or its rail icon) moves it to that shelf. */
+  shelfDropTarget(el, n, key) {
+    el.addEventListener('dragover', e => {
+      if (!this.drag || this.drag.kind !== 'beat') return;
+      e.preventDefault(); el.addClass('pw-drop-target');
+    });
+    el.addEventListener('dragleave', () => el.removeClass('pw-drop-target'));
+    el.addEventListener('drop', e => {
+      if (!this.drag || this.drag.kind !== 'beat') return;
+      e.preventDefault();
+      const d = this.drag; this.endDrag();
+      const b = NV.beat(n, d.id);
+      NV.moveToShelf(n, d.id, key, null);
+      if (b && this.ui.shelfCollapsed) new Notice(`“${b.title}” → ${SHELF_TABS.find(t => t.key === key).label}`);
+      this.plugin.commit();
+    });
+  }
+
+  /** Collapsed shelf: a slim strip that still shows counts and still accepts dropped cards. */
+  renderShelfRail(rail, n) {
+    const exp = rail.createDiv('pw-rail-btn');
+    setIcon(exp, 'chevrons-left');
+    exp.setAttr('aria-label', 'Expand the idea shelf');
+    exp.onclick = () => this.setUi({ shelfCollapsed: false });
+    for (const t of SHELF_TABS) {
+      const count = NV.shelf(n, t.key).length;
+      const tab = rail.createDiv('pw-rail-tab');
+      setIcon(tab.createSpan('pw-btn-icon'), t.icon);
+      tab.createSpan({ cls: 'pw-count', text: String(count) });
+      tab.setAttr('aria-label', `${t.label} (${count}): click to open · drop a card here to move it`);
+      tab.onclick = () => this.setUi({ shelfCollapsed: false, shelfTab: t.key });
+      this.shelfDropTarget(tab, n, t.key);
+    }
+    const add = rail.createDiv('pw-rail-btn pw-rail-add');
+    setIcon(add, 'plus');
+    add.setAttr('aria-label', 'Jot down an idea');
+    add.onclick = () => new TextPromptModal(this.app, 'Capture an idea', 'Idea…', '', title => {
+      n.beats.push(makeBeat({ title, shelfOrder: Date.now() }));
+      this.plugin.commit();
+      new Notice(`Added to Unplaced: “${title}”`);
+    }).open();
+    rail.createDiv({ cls: 'pw-rail-label', text: 'Idea shelf' });
+  }
+
   renderShelf(shelf, n) {
     const kind = this.ui.shelfTab || 'unplaced';
     const tabs = shelf.createDiv('pw-shelf-tabs');
@@ -1264,19 +1309,12 @@ class PlotWeaverView extends ItemView {
       tab.createSpan({ cls: 'pw-count', text: String(NV.shelf(n, t.key).length) });
       tab.setAttr('aria-label', `${t.hint} Drop a card here to move it.`);
       tab.onclick = () => this.setUi({ shelfTab: t.key });
-      tab.addEventListener('dragover', e => {
-        if (!this.drag || this.drag.kind !== 'beat') return;
-        e.preventDefault(); tab.addClass('pw-drop-target');
-      });
-      tab.addEventListener('dragleave', () => tab.removeClass('pw-drop-target'));
-      tab.addEventListener('drop', e => {
-        if (!this.drag || this.drag.kind !== 'beat') return;
-        e.preventDefault();
-        const d = this.drag; this.endDrag();
-        NV.moveToShelf(n, d.id, t.key, null);
-        this.plugin.commit();
-      });
+      this.shelfDropTarget(tab, n, t.key);
     }
+    const col = tabs.createDiv('pw-shelf-collapse');
+    setIcon(col, 'chevrons-right');
+    col.setAttr('aria-label', 'Collapse the idea shelf');
+    col.onclick = () => this.setUi({ shelfCollapsed: true });
     const tabInfo = SHELF_TABS.find(t => t.key === kind);
     shelf.createDiv({ cls: 'pw-shelf-hint', text: tabInfo.hint });
 
@@ -1737,7 +1775,7 @@ class PlotWeaverPlugin extends Plugin {
       novels: (d.novels || []).map(normalizeNovel),
       activeNovelId: d.activeNovelId,
       settings: Object.assign({}, DEFAULT_SETTINGS, d.settings),
-      ui: Object.assign({}, DEFAULT_UI, d.ui),
+      ui: Object.assign({}, DEFAULT_UI, d.ui, d.ui && d.ui.showShelf === false && d.ui.shelfCollapsed === undefined ? { shelfCollapsed: true } : {}),
     };
     if (!this.data.novels.length) {
       const ex = makeExampleNovel();
