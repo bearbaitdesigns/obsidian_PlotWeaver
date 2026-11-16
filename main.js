@@ -23,6 +23,7 @@ const DEFAULT_SETTINGS = {
   defaultTemplate: '',
   askTemplate: true,
   addProperties: true,
+  fullscreenWindow: true,
 };
 const DEFAULT_UI = { mode: 'board', columns: 'time', shelfTab: 'unplaced', showShelf: true, showArrows: true, showOffscreen: true, povFilter: 'all' };
 
@@ -776,9 +777,52 @@ class PlotWeaverView extends ItemView {
   get novel() { return this.plugin.activeNovel(); }
   get byChapter() { return this.ui.columns === 'chapters'; }
 
-  async onOpen() { this.contentEl.addClass('pw-root'); this.render(); }
-  async onClose() { this.contentEl.empty(); }
+  async onOpen() {
+    this.contentEl.addClass('pw-root');
+    this.registerDomEvent(document, 'keydown', e => {
+      if (e.key !== 'Escape' || !this.fsHost) return;
+      if (document.querySelector('.modal-container, .menu')) return; // let dialogs and menus handle their own Esc
+      e.preventDefault();
+      this.setFullscreen(false);
+    });
+    this.registerDomEvent(window, 'resize', () => { if (this.fsHost) this.scheduleArrows(); });
+    this.render();
+  }
+  async onClose() { this.setFullscreen(false, true); this.contentEl.empty(); }
   onResize() { this.scheduleArrows(); }
+
+  /**
+   * Full screen: the board is lifted out of its tab into an overlay covering the whole Obsidian window
+   * (so Obsidian's dialogs and menus, which live on <body>, still appear above it), and the window itself
+   * goes full screen where the platform allows.
+   */
+  get isFullscreen() { return !!this.fsHost; }
+  setFullscreen(on, quiet) {
+    if (on && !this.fsHost) {
+      this.fsHost = document.body.createDiv('pw-fs-host');
+      this.fsHost.appendChild(this.contentEl);
+      this.contentEl.addClass('is-fullscreen');
+      this.fsWindow = false;
+      const want = this.plugin.data.settings.fullscreenWindow;
+      if (want && document.fullscreenEnabled && !document.fullscreenElement && document.documentElement.requestFullscreen) {
+        try {
+          const pr = document.documentElement.requestFullscreen();
+          this.fsWindow = true;
+          if (pr && pr.catch) pr.catch(() => { this.fsWindow = false; });
+        } catch (err) { this.fsWindow = false; }
+      }
+    } else if (!on && this.fsHost) {
+      this.containerEl.appendChild(this.contentEl);
+      this.contentEl.removeClass('is-fullscreen');
+      this.fsHost.remove();
+      this.fsHost = null;
+      if (this.fsWindow && document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+      this.fsWindow = false;
+    } else {
+      return;
+    }
+    if (!quiet) this.render();
+  }
 
   setUi(patch) { Object.assign(this.ui, patch); this.plugin.commit(); }
 
@@ -866,6 +910,9 @@ class PlotWeaverView extends ItemView {
     else this.tbButton(g3, 'columns-3', 'Story event', () => this.plugin.addSlot(n, n.slots.length), undefined, 'Add a story-time event (column)');
     this.tbButton(g3, 'settings', '', () => new ManageModal(this.plugin).open(), undefined, 'Manage plotlines, POVs, story time, chapters and novels');
     this.tbButton(g3, 'file-output', '', () => this.plugin.exportOutline(n), undefined, 'Export outline to a note');
+    const fs = this.tbButton(g3, this.isFullscreen ? 'minimize-2' : 'maximize-2', '', () => this.setFullscreen(!this.isFullscreen),
+      this.isFullscreen, this.isFullscreen ? 'Exit full screen (Esc)' : 'Full screen');
+    fs.addClass('pw-fs-btn');
   }
 
   matchesPov(b) {
@@ -1626,6 +1673,8 @@ class PlotWeaverSettingTab extends PluginSettingTab {
     vars.setText('Template variables: {{title}} {{summary}} {{novel}} {{plotline}} {{pov}} {{when}} {{chapter}} {{offscreen}} {{status}} {{shapedBy}} {{leadsTo}} {{date}} {{time}} {{id}}. Anything else (e.g. Templater <% %> code) is left untouched.');
 
     c.createEl('h3', { text: 'Board' });
+    new Setting(c).setName('Full screen fills the display').setDesc('When you turn on full screen, also make the Obsidian window full screen (desktop). Off: the board just fills the Obsidian window.')
+      .addToggle(t => t.setValue(s.fullscreenWindow).onChange(v => { s.fullscreenWindow = v; this.plugin.requestSave(); }));
     new Setting(c).setName('Confirm before deleting').setDesc('Ask before permanently deleting an idea. (Archiving never asks.)')
       .addToggle(t => t.setValue(s.confirmDelete).onChange(v => { s.confirmDelete = v; this.plugin.requestSave(); }));
     new Setting(c).setName('Column width').setDesc('Width of each board column, in pixels.')
@@ -1651,6 +1700,14 @@ class PlotWeaverPlugin extends Plugin {
         new Notice(`Added to Unplaced: “${title}”`);
       }).open(),
     });
+    this.addCommand({
+      id: 'toggle-fullscreen', name: 'Toggle full screen',
+      callback: async () => {
+        let view = this.boardView();
+        if (!view) { await this.activateView(); view = this.boardView(); }
+        if (view) view.setFullscreen(!view.isFullscreen);
+      },
+    });
     this.addCommand({ id: 'export-outline', name: 'Export outline to note', callback: () => this.exportOutline(this.activeNovel()) });
     this.addCommand({ id: 'manage', name: 'Manage plotlines, POVs, story time and chapters', callback: () => new ManageModal(this).open() });
     this.addCommand({ id: 'add-example', name: 'Add example novel', callback: () => { this.addNovel(makeExampleNovel()); this.activateView(); } });
@@ -1670,6 +1727,7 @@ class PlotWeaverPlugin extends Plugin {
   }
 
   onunload() {
+    this.leaveFullscreen();
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveData(this.data); }
   }
 
@@ -1709,6 +1767,16 @@ class PlotWeaverPlugin extends Plugin {
     this.refreshTimer = setTimeout(() => this.refreshViews(), 250);
   }
   commit() { this.requestSave(); this.refreshViews(); }
+  boardView() {
+    const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
+    return leaf && leaf.view instanceof PlotWeaverView ? leaf.view : null;
+  }
+  /** Notes open in a normal tab, which the full-screen board would cover, so step out first. */
+  leaveFullscreen() {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      if (leaf.view instanceof PlotWeaverView) leaf.view.setFullscreen(false);
+    }
+  }
 
   async activateView() {
     const { workspace } = this.app;
@@ -1904,7 +1972,7 @@ class PlotWeaverPlugin extends Plugin {
       }
       b.notePath = file.path;
       this.commit();
-      await this.app.workspace.getLeaf('tab').openFile(file);
+      this.leaveFullscreen(); await this.app.workspace.getLeaf('tab').openFile(file);
     } catch (err) {
       console.error('Plot Weaver', err);
       new Notice(`Plot Weaver couldn’t create the note: ${err.message}`);
@@ -1912,7 +1980,7 @@ class PlotWeaverPlugin extends Plugin {
   }
   async openNote(n, b) {
     const file = b.notePath ? this.app.vault.getAbstractFileByPath(b.notePath) : null;
-    if (file instanceof TFile) { await this.app.workspace.getLeaf('tab').openFile(file); return; }
+    if (file instanceof TFile) { this.leaveFullscreen(); await this.app.workspace.getLeaf('tab').openFile(file); return; }
     if (b.notePath) { b.notePath = null; this.commit(); new Notice('The linked note no longer exists.'); }
     this.createNoteFlow(n, b);
   }
@@ -1985,7 +2053,7 @@ class PlotWeaverPlugin extends Plugin {
       let file = this.app.vault.getAbstractFileByPath(path);
       if (file instanceof TFile) await this.app.vault.modify(file, md);
       else file = await this.app.vault.create(path, md);
-      await this.app.workspace.getLeaf('tab').openFile(file);
+      this.leaveFullscreen(); await this.app.workspace.getLeaf('tab').openFile(file);
       new Notice(`Outline exported to ${path}`);
     } catch (err) {
       console.error('Plot Weaver', err);

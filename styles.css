@@ -343,3 +343,12 @@
 .pw-picker-label { display: flex; align-items: center; gap: 8px; font-weight: 500; }
 .pw-picker-desc { font-size: 11px; color: var(--text-faint); margin-top: 1px; }
 .pw-vars { margin: 6px 0 14px; font-family: var(--font-monospace, monospace); font-size: 11px; }
+
+/* ---------- full screen */
+.pw-fs-host {
+  position: fixed; inset: 0; z-index: 20; /* above sidebars and status bar, below Obsidian's popovers, dialogs and menus */
+  display: flex; background: var(--background-primary);
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.pw-fs-host > .pw-root { flex: 1; height: 100%; width: 100%; }
+.pw-fs-btn { margin-left: 4px; }

@@ -16,6 +16,7 @@ An Obsidian plugin for outlining a novel with **several plotlines running at onc
 - **Idea shelf.** **Unplaced** (new ideas), **Later** (saved for later) and **Archive**. Restoring an idea puts it back where it was. Deleting always asks you to confirm.
 - **Scene notes.** Create a note for any scene from one of your templates, or link a note you already have.
 - **Export.** Write the whole outline (manuscript, story-world timeline and shelves) to a markdown note.
+- **Full screen.** The board fills the whole display; Esc or the ⤡ button exits. Dialogs and menus still work while it’s on.
 - **Several novels.** Switch between them from the toolbar.
 
 ## Install with BRAT
@@ -49,6 +50,7 @@ Anything else, including Templater `<% %>` code, is left untouched. Plot Weaver 
 ## Commands
 
 - **Open board**
+- **Toggle full screen**: you can give it a hotkey in *Settings → Hotkeys*
 - **Capture an idea**: adds an idea to the Unplaced shelf from anywhere
 - **Manage plotlines, POVs, story time and chapters**
 - **Export outline to note**
