@@ -1300,6 +1300,14 @@ class PlotWeaverView extends ItemView {
 
   renderShelf(shelf, n) {
     const kind = this.ui.shelfTab || 'unplaced';
+    const head = shelf.createDiv('pw-shelf-head');
+    head.createSpan({ cls: 'pw-shelf-title', text: 'Idea shelf' });
+    head.createDiv('pw-spacer');
+    const col = head.createEl('button', { cls: 'pw-btn pw-shelf-collapse' });
+    col.createSpan({ cls: 'pw-btn-label', text: 'Collapse' });
+    setIcon(col.createSpan('pw-btn-icon'), 'chevrons-right');
+    col.setAttr('aria-label', 'Collapse the idea shelf to a slim strip');
+    col.onclick = () => this.setUi({ shelfCollapsed: true });
     const tabs = shelf.createDiv('pw-shelf-tabs');
     for (const t of SHELF_TABS) {
       const tab = tabs.createDiv('pw-shelf-tab');
@@ -1311,10 +1319,7 @@ class PlotWeaverView extends ItemView {
       tab.onclick = () => this.setUi({ shelfTab: t.key });
       this.shelfDropTarget(tab, n, t.key);
     }
-    const col = tabs.createDiv('pw-shelf-collapse');
-    setIcon(col, 'chevrons-right');
-    col.setAttr('aria-label', 'Collapse the idea shelf');
-    col.onclick = () => this.setUi({ shelfCollapsed: true });
+
     const tabInfo = SHELF_TABS.find(t => t.key === kind);
     shelf.createDiv({ cls: 'pw-shelf-hint', text: tabInfo.hint });
 

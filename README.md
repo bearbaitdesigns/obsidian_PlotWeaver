@@ -13,7 +13,7 @@ An Obsidian plugin for outlining a novel with **several plotlines running at onc
 - **Off-screen events.** Events that happen in the story world but aren’t on the page. They sit on their plotline, can influence other events, and appear in the Outline at their point in story time.
 - **Influences.** Link any event to the events it causes, with a note on how. Links are drawn as arrows on the board. Hover over a card to trace them and read the notes.
 - **Outline.** Manuscript order, grouped by chapter. Drag scenes to reorder them or move them between chapters, and drag chapter headings to reorder chapters. Flashbacks are marked, and each scene lists what shaped it and what it leads to.
-- **Idea shelf.** **Unplaced** (new ideas), **Later** (saved for later) and **Archive**. Restoring an idea puts it back where it was. Deleting always asks you to confirm. Collapse the shelf (») to a slim strip that still shows counts, still accepts dropped cards, and has a **+** button for jotting down ideas.
+- **Idea shelf.** **Unplaced** (new ideas), **Later** (saved for later) and **Archive**. Restoring an idea puts it back where it was. Deleting always asks you to confirm. Collapse the shelf (**Collapse »** in its header, or the toolbar’s **Shelf** button) to a slim strip that still shows counts, still accepts dropped cards, and has a **+** button for jotting down ideas.
 - **Scene notes.** Create a note for any scene from one of your templates, or link a note you already have.
 - **Export.** Write the whole outline (manuscript, story-world timeline and shelves) to a markdown note.
 - **Full screen.** The board fills the whole display; Esc or the ⤡ button exits. Dialogs and menus still work while it’s on.
