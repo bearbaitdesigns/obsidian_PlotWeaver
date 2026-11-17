@@ -426,7 +426,7 @@
 .pw-inf-head { display: flex; align-items: baseline; gap: 4px; }
 .pw-inf-tip { margin-top: 8px; font-style: italic; }
 
-/* ---------- sections (parts, prologue, interlude, epilogue) & broken-down cards */
+/* ---------- sections (parts, prologue, interlude, epilogue) */
 .pw-kind-icon { display: inline-flex; color: var(--text-muted); }
 .pw-kind-icon svg { width: 14px; height: 14px; }
 .pw-slot-header.pw-kind-part { background: color-mix(in srgb, var(--interactive-accent) 20%, var(--background-secondary)); }
@@ -444,25 +444,11 @@
 .pw-orow-summary .pw-onum { color: var(--interactive-accent); }
 .pw-orow-summary .pw-onum svg { width: 15px; height: 15px; }
 
-.pw-tag-where { background: var(--background-modifier-hover); border-radius: 9px; padding: 0 6px; font-size: 10.5px; }
-.pw-tag-where svg { width: 11px; height: 11px; }
 .pw-card.pw-summary-card { background: color-mix(in srgb, var(--interactive-accent) 6%, var(--background-primary)); }
-.pw-parent-chip { font-size: 11px; color: var(--text-faint); margin-top: 3px; }
 .pw-chapter-chip.is-part::before { content: "❖ "; }
 
-.pw-scenes { margin-top: 6px; padding-top: 5px; border-top: 1px dashed var(--background-modifier-border); display: flex; flex-direction: column; gap: 1px; }
-.pw-scene-row { display: flex; align-items: baseline; gap: 6px; padding: 2px 4px; border-radius: 4px; cursor: pointer; font-size: 11.5px; }
-.pw-scene-row:hover { background: var(--background-modifier-hover); }
-.pw-scene-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--pw-color); flex-shrink: 0; transform: translateY(-1px); }
-.pw-scene-title { flex: 1; color: var(--text-normal); }
-.pw-scene-ch { font-size: 10.5px; color: var(--text-faint); white-space: nowrap; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
-.pw-scene-add { font-size: 11px; color: var(--text-faint); padding: 2px 4px; cursor: pointer; }
-.pw-scene-add:hover { color: var(--interactive-accent); }
 
 .pw-mrow.is-part { background: color-mix(in srgb, var(--interactive-accent) 8%, transparent); font-weight: 600; }
 .pw-mrow.is-in-part { padding-left: 18px; }
 .pw-kind-select { width: 112px; flex-shrink: 0; }
 .pw-add-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.pw-breakdown { margin: 10px 0 4px; }
-.pw-tag-scenes { background: color-mix(in srgb, var(--interactive-accent) 14%, transparent); color: var(--text-normal); border-radius: 9px; padding: 0 6px; font-size: 10.5px; cursor: help; }
-.pw-tag-scenes svg { width: 11px; height: 11px; }
