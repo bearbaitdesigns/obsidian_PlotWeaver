@@ -464,3 +464,5 @@
 .pw-kind-select { width: 112px; flex-shrink: 0; }
 .pw-add-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .pw-breakdown { margin: 10px 0 4px; }
+.pw-tag-scenes { background: color-mix(in srgb, var(--interactive-accent) 14%, transparent); color: var(--text-normal); border-radius: 9px; padding: 0 6px; font-size: 10.5px; cursor: help; }
+.pw-tag-scenes svg { width: 11px; height: 11px; }
