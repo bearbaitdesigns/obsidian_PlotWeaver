@@ -13,6 +13,7 @@ const {
 const VIEW_TYPE = 'plot-weaver-board';
 const PALETTE = ['#4f8fd6', '#d9534f', '#5cb85c', '#e0a030', '#9b6ad6', '#3fb6b2', '#d97a3f', '#c05c8a', '#7a8b99'];
 const SVGNS = 'http://www.w3.org/2000/svg';
+const PART_COLORS = ['#7b6cd9', '#d97a3f', '#3fb6b2', '#c05c8a', '#5cb85c', '#4f8fd6', '#e0a030'];
 
 const DEFAULT_SETTINGS = {
   notesFolder: 'Novel Notes',
@@ -110,6 +111,10 @@ function normalizeNovel(n) {
   }
   for (const b of n.beats) delete b.chapter;
   n.chapters = n.chapters.map(c => Object.assign({ kind: 'chapter' }, c));
+  n.chapters.filter(c => c.kind === 'part').forEach((c, i) => {
+    if (!c.color) c.color = PART_COLORS[i % PART_COLORS.length];
+    if (typeof c.description !== 'string') c.description = '';
+  });
   const beatIds = new Set(n.beats.map(b => b.id));
   for (const b of n.beats) {
     delete b.where; // older versions let a card show on the board or outline only; every card now shows in both
@@ -247,6 +252,22 @@ const NV = {
     const i = NV.chapterIndex(n, sectionId);
     for (let k = i; k >= 0; k--) if (NV.kind(n.chapters[k]) === 'part') return n.chapters[k];
     return null;
+  },
+  /** The chapters and interludes a Part contains (up to the next Part; prologues/epilogues stand outside). */
+  partSections(n, part) {
+    const out = [];
+    let i = NV.chapterIndex(n, part.id);
+    for (i += 1; i < n.chapters.length; i++) {
+      const k = NV.kind(n.chapters[i]);
+      if (k === 'part') break;
+      if (k === 'chapter' || k === 'interlude') out.push(n.chapters[i]);
+    }
+    return out;
+  },
+  partColor(n, part) {
+    if (part.color) return part.color;
+    const i = n.chapters.filter(c => NV.kind(c) === 'part').indexOf(part);
+    return PART_COLORS[Math.max(0, i) % PART_COLORS.length];
   },
   defaultSectionTitle(n, kind) {
     const count = n.chapters.filter(c => NV.kind(c) === kind).length;
@@ -825,6 +846,99 @@ class BeatModal extends Modal {
   }
 }
 
+/** Everything about a Part: its colour, description, chapters, story-time span, plotlines and summary cards. */
+class PartModal extends Modal {
+  constructor(plugin, novel, part) { super(plugin.app); Object.assign(this, { plugin, n: novel, part }); }
+  onOpen() { this.modalEl.addClass('pw-modal', 'pw-part-modal'); this.draw(); }
+  onClose() { this.contentEl.empty(); this.plugin.commit(); }
+  soft() { this.plugin.requestSave(); this.plugin.refreshViewsSoon(); }
+  draw() {
+    const n = this.n, part = this.part, c = this.contentEl;
+    c.empty();
+    this.modalEl.style.setProperty('--pw-part', NV.partColor(n, part));
+    this.titleEl.setText('Part details');
+
+    const head = c.createDiv('pw-part-head');
+    setIcon(head.createSpan('pw-part-icon'), 'library');
+    const title = head.createEl('input', { type: 'text', cls: 'pw-part-title-input' });
+    title.value = part.title;
+    title.oninput = () => { part.title = title.value || 'Untitled part'; this.soft(); };
+
+    const sw = c.createDiv('pw-swatches pw-part-swatches');
+    for (const col of PART_COLORS.concat(PALETTE.filter(x => !PART_COLORS.includes(x)))) {
+      const d = sw.createDiv('pw-swatch');
+      d.style.background = col;
+      d.toggleClass('is-active', col === NV.partColor(n, part));
+      d.onclick = () => { part.color = col; this.soft(); this.draw(); };
+    }
+    const custom = sw.createEl('input', { type: 'color' });
+    custom.value = NV.partColor(n, part);
+    custom.onchange = () => { part.color = custom.value; this.soft(); this.draw(); };
+
+    const desc = c.createEl('textarea', { cls: 'pw-textarea pw-part-desc' });
+    desc.rows = 3;
+    desc.placeholder = 'What is this part about? Its arc, turning point, tone…';
+    desc.value = part.description || '';
+    desc.oninput = () => { part.description = desc.value; this.soft(); };
+
+    const secs = NV.partSections(n, part);
+    const scenes = n.beats.filter(b => NV.onBoard(n, b) && !b.offscreen && secs.some(s => s.id === b.chapterId));
+    const times = scenes.map(b => NV.timeOf(n, b)).filter(Boolean).map(t => NV.slotIndex(n, t.id));
+    const stats = c.createDiv('pw-part-stats');
+    const stat = (label, value) => { const d = stats.createDiv('pw-part-stat'); d.createDiv({ cls: 'pw-part-stat-v', text: value }); d.createDiv({ cls: 'pw-part-stat-l', text: label }); };
+    stat('chapters', String(secs.length));
+    stat('scenes', String(scenes.length));
+    stat('story time', times.length ? (Math.min(...times) === Math.max(...times) ? n.slots[Math.min(...times)].label : `${n.slots[Math.min(...times)].label} → ${n.slots[Math.max(...times)].label}`) : '—');
+
+    const lanes = n.plotlines.map(p => ({ p, k: scenes.filter(b => b.plotlineId === p.id).length })).filter(x => x.k);
+    if (lanes.length) {
+      const pl = c.createDiv('pw-part-plotlines');
+      for (const x of lanes) {
+        const chip = pl.createSpan({ cls: 'pw-plot-chip', text: `${x.p.name} ${x.k}` });
+        chip.style.setProperty('--pw-color', x.p.color);
+      }
+    }
+
+    c.createEl('h4', { text: 'Chapters', cls: 'pw-h' });
+    if (!secs.length) c.createDiv({ cls: 'pw-muted', text: 'No chapters in this part yet.' });
+    for (const s of secs) {
+      const row = c.createDiv('pw-part-ch');
+      setIcon(row.createSpan('pw-kind-icon'), NV.kindInfo(s).icon);
+      row.createSpan({ cls: 'pw-part-ch-title', text: s.title });
+      const inCh = scenes.filter(b => b.chapterId === s.id);
+      const povs = [...new Set(inCh.map(b => b.povId).filter(Boolean))].map(id => NV.pov(n, id)).filter(Boolean);
+      for (const p of povs) { const b = row.createSpan({ cls: 'pw-pov', text: p.name }); b.style.setProperty('--pw-pov', p.color); }
+      row.createSpan({ cls: 'pw-count', text: plural(inCh.length, 'scene') });
+    }
+    c.createEl('button', { text: '＋ Add a chapter to this part', cls: 'pw-small-btn' }).onclick = () => {
+      this.close();
+      this.plugin.addSection(n, 'chapter', NV.chapterIndex(n, part.id) + 1 + secs.length);
+    };
+
+    c.createEl('h4', { text: 'Summary cards', cls: 'pw-h' });
+    const sums = n.beats.filter(b => b.chapterId === part.id && b.status === 'active');
+    if (!sums.length) c.createDiv({ cls: 'pw-muted', text: 'Optional: a card that sums up this part. Drop a card on the part’s bar, or add one here.' });
+    for (const b of sums) {
+      const row = c.createDiv('pw-part-sum');
+      const t = row.createDiv('pw-part-sum-body');
+      t.createDiv({ cls: 'pw-otitle', text: b.title });
+      if (b.summary) t.createDiv({ cls: 'pw-muted', text: b.summary });
+      const ed = row.createEl('button', { text: 'Edit', cls: 'pw-small-btn' });
+      ed.onclick = () => { this.close(); new BeatModal(this.plugin, n, b, false).open(); };
+    }
+    c.createEl('button', { text: '＋ Add a summary card', cls: 'pw-small-btn' }).onclick = () => {
+      this.close();
+      const lane = n.plotlines.find(p => !p.archived);
+      new BeatModal(this.plugin, n, makeBeat({ chapterId: part.id, plotlineId: lane ? lane.id : null }), true).open();
+    };
+
+    const foot = c.createDiv('pw-modal-footer');
+    foot.createEl('button', { text: 'Delete part…', cls: 'mod-warning' }).onclick = () => { this.close(); this.plugin.deleteChapter(n, part); };
+    foot.createDiv('pw-spacer');
+    foot.createEl('button', { text: 'Done', cls: 'mod-cta' }).onclick = () => this.close();
+  }
+}
+
 class ManageModal extends Modal {
   constructor(plugin, tab) { super(plugin.app); this.plugin = plugin; this.tab = tab || 'plotlines'; }
   get n() { return this.plugin.activeNovel(); }
@@ -1211,8 +1325,21 @@ class PlotWeaverView extends ItemView {
     const byChapter = this.byChapter;
     let cols;
     if (byChapter) {
-      cols = n.chapters.map((c, i) => ({ id: c.id, label: c.title, item: c, i, kind: NV.kind(c) }));
-      cols.push({ id: null, label: 'No chapter yet', staging: true, hint: 'On-screen scenes placed in story time but not yet in a chapter. Drag them into a chapter when you’re ready.' });
+      // Parts are drawn as coloured bars over the chapters they contain, not as columns of their own.
+      cols = [];
+      let curPart = null;
+      n.chapters.forEach((c, i) => {
+        const kind = NV.kind(c);
+        if (kind === 'part') {
+          curPart = c;
+          if (!NV.partSections(n, c).length) cols.push({ id: null, placeholder: true, item: c, i, partId: c.id, label: 'No chapters yet' });
+          return;
+        }
+        const inPart = (kind === 'chapter' || kind === 'interlude') ? curPart : null;
+        if (kind === 'prologue' || kind === 'epilogue') curPart = kind === 'epilogue' ? null : curPart;
+        cols.push({ id: c.id, label: c.title, item: c, i, kind, partId: inPart ? inPart.id : null });
+      });
+      cols.push({ id: null, label: 'No chapter yet', staging: true, partId: null, hint: 'On-screen scenes placed in story time but not yet in a chapter. Drag them into a chapter when you’re ready.' });
     } else {
       cols = n.slots.map((s, i) => ({ id: s.id, label: s.label, item: s, i }));
       if (n.beats.some(b => NV.onBoard(n, b) && !NV.timeOf(n, b))) {
@@ -1240,9 +1367,13 @@ class PlotWeaverView extends ItemView {
     this.gridEl = grid;
     grid.style.gridTemplateColumns = `var(--pw-lane-w) ${lead ? 'var(--pw-col-w) ' : ''}repeat(${cols.length}, var(--pw-col-w)) 56px`;
 
+    const bands = byChapter && n.chapters.some(c => NV.kind(c) === 'part');
+    grid.toggleClass('pw-has-parts', !!bands);
     const corner = grid.createDiv('pw-corner');
+    if (bands) corner.style.gridRow = '1 / span 2';
     corner.createDiv({ cls: 'pw-corner-x', text: byChapter ? 'Chapters →' : 'Story time →' });
     corner.createDiv({ cls: 'pw-corner-y', text: 'Plotlines ↓' });
+    if (bands) this.renderPartBands(grid, n, cols, lead);
     if (lead) {
       const lh = grid.createDiv('pw-slot-header pw-lead-header');
       setIcon(lh.createSpan('pw-btn-icon'), 'link');
@@ -1312,7 +1443,76 @@ class PlotWeaverView extends ItemView {
     m.showAtMouseEvent(e);
   }
 
+  /** One row above the column headers: a coloured bar per Part, spanning its chapters. */
+  renderPartBands(grid, n, cols, lead) {
+    if (lead) grid.createDiv('pw-band-gap');
+    let i = 0;
+    while (i < cols.length) {
+      const pid = cols[i].partId;
+      let j = i;
+      while (j + 1 < cols.length && pid && cols[j + 1].partId === pid) j++;
+      if (!pid) { grid.createDiv('pw-band-gap'); i += 1; continue; }
+      const part = NV.chapter(n, pid);
+      const bar = grid.createDiv('pw-part-bar');
+      bar.style.gridColumn = `span ${j - i + 1}`;
+      bar.style.setProperty('--pw-part', NV.partColor(n, part));
+      setIcon(bar.createSpan('pw-part-icon'), 'library');
+      bar.createSpan({ cls: 'pw-part-title', text: part.title });
+      const secs = NV.partSections(n, part);
+      const scenes = n.beats.filter(b => NV.onBoard(n, b) && !b.offscreen && secs.some(c => c.id === b.chapterId)).length;
+      bar.createSpan({ cls: 'pw-part-meta', text: `${plural(secs.length, 'chapter')} · ${plural(scenes, 'scene')}` });
+      const sums = n.beats.filter(b => b.chapterId === part.id && b.status === 'active');
+      if (sums.length) {
+        const chip = bar.createSpan({ cls: 'pw-part-chip', text: plural(sums.length, 'summary card') });
+        chip.setAttr('aria-label', sums.map(b => b.title).join('\n'));
+      }
+      bar.createDiv('pw-spacer');
+      const more = bar.createDiv('pw-icon-btn');
+      setIcon(more, 'more-horizontal');
+      bar.setAttr('aria-label', `${part.title}${part.description ? ` — ${part.description}` : ''}\nDouble-click for details`);
+      const pi = NV.chapterIndex(n, part.id);
+      const menu = e => {
+        const m = new Menu();
+        m.addItem(it => it.setTitle('Part details…').setIcon('info').onClick(() => new PartModal(this.plugin, n, part).open()));
+        m.addItem(it => it.setTitle('Rename').setIcon('pencil').onClick(() => this.plugin.renameChapter(n, part)));
+        m.addItem(it => it.setTitle('Change colour').setIcon('palette').onClick(() => new ColorModal(this.app, `Colour for “${part.title}”`, NV.partColor(n, part), c => { part.color = c; this.plugin.commit(); }).open()));
+        m.addItem(it => it.setTitle('Add a chapter to this part').setIcon('plus').onClick(() => this.plugin.addSection(n, 'chapter', pi + 1 + secs.length)));
+        m.addSeparator();
+        m.addItem(it => it.setTitle('Make it a Chapter').setIcon('book-open').onClick(() => this.plugin.setSectionKind(n, part, 'chapter')));
+        m.addItem(it => it.setTitle('Delete part…').setIcon('trash-2').onClick(() => this.plugin.deleteChapter(n, part)));
+        m.showAtMouseEvent(e);
+      };
+      more.onclick = e => { e.stopPropagation(); menu(e); };
+      bar.addEventListener('contextmenu', e => { e.preventDefault(); menu(e); });
+      bar.addEventListener('dblclick', () => new PartModal(this.plugin, n, part).open());
+      // Dropping a card on the bar makes it this part's summary.
+      bar.addEventListener('dragover', e => { if (this.drag && this.drag.kind === 'beat') { e.preventDefault(); bar.addClass('pw-drop-target'); } });
+      bar.addEventListener('dragleave', () => bar.removeClass('pw-drop-target'));
+      bar.addEventListener('drop', e => {
+        if (!this.drag || this.drag.kind !== 'beat') return;
+        e.preventDefault();
+        const d = this.drag; this.endDrag();
+        const b = NV.beat(n, d.id);
+        if (!b) return;
+        b.offscreen = false;
+        NV.assignChapter(n, b.id, part.id, null);
+        b.status = 'active';
+        this.plugin.commit();
+        new Notice(`“${b.title}” is now the summary of “${part.title}”.`);
+      });
+      i = j + 1;
+    }
+    grid.createDiv('pw-band-gap');
+  }
+
   renderColHeader(grid, n, col, byChapter) {
+    if (col.placeholder) {
+      const h = grid.createDiv('pw-slot-header pw-staging-header pw-part-empty');
+      const add = h.createEl('button', { cls: 'pw-small-btn', text: '＋ Add a chapter' });
+      add.onclick = () => this.plugin.addSection(n, 'chapter', NV.chapterIndex(n, col.item.id) + 1);
+      h.setAttr('aria-label', `“${col.item.title}” has no chapters yet`);
+      return;
+    }
     const h = grid.createDiv('pw-slot-header');
     if (byChapter) h.addClass('pw-chapter-header');
     if (col.staging) {
@@ -1416,6 +1616,7 @@ class PlotWeaverView extends ItemView {
   }
 
   renderCell(grid, n, p, col, byChapter) {
+    if (col.placeholder) { grid.createDiv('pw-cell pw-staging pw-part-empty-cell'); return; }
     const cell = grid.createDiv('pw-cell');
     cell.style.setProperty('--pw-color', p.color);
     if (col.staging) cell.addClass('pw-staging');
@@ -1881,7 +2082,11 @@ class PlotWeaverView extends ItemView {
         setIcon(ic, k.icon);
         ic.setAttr('aria-label', k.label);
         const t = gh.createSpan({ cls: 'pw-chapter-title', text: ch.title });
-        t.addEventListener('dblclick', () => this.plugin.renameChapter(n, ch));
+        if (kind === 'part') {
+          gh.style.setProperty('--pw-part', NV.partColor(n, ch));
+          if (ch.description) sec.createDiv({ cls: 'pw-part-desc-line', text: ch.description });
+        }
+        t.addEventListener('dblclick', () => (kind === 'part' ? new PartModal(this.plugin, n, ch).open() : this.plugin.renameChapter(n, ch)));
         const nScenes = g.items.filter(b => !b.offscreen && !NV.isSummary(n, b)).length;
         if (kind !== 'part' || nScenes) gh.createSpan({ cls: 'pw-count', text: plural(nScenes, 'scene') });
         gh.createDiv('pw-spacer');
@@ -1889,6 +2094,7 @@ class PlotWeaverView extends ItemView {
         setIcon(more, 'more-horizontal');
         const menu = e => {
           const m = new Menu();
+          if (kind === 'part') m.addItem(it => it.setTitle('Part details…').setIcon('info').onClick(() => new PartModal(this.plugin, n, ch).open()));
           m.addItem(it => it.setTitle('Rename').setIcon('pencil').onClick(() => this.plugin.renameChapter(n, ch)));
           m.addItem(it => it.setTitle('Insert section before…').setIcon('arrow-up').onClick(() => this.plugin.addSectionMenu(n, ci, e)));
           m.addItem(it => it.setTitle('Insert section after…').setIcon('arrow-down').onClick(() => this.plugin.addSectionMenu(n, ci + 1, e)));
