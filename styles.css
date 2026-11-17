@@ -189,14 +189,12 @@
 .pw-arrow-off .pw-arrow-line { stroke-dasharray: 5 4; }
 .pw-arrow-origin { stroke: var(--background-primary); stroke-width: 1.5; }
 .pw-arrow-head { stroke: var(--background-primary); stroke-width: 1; stroke-linejoin: round; }
-.pw-arrow-label {
-  display: none; font-size: 11px; font-weight: 500; fill: var(--text-normal);
-  paint-order: stroke; stroke: var(--background-primary); stroke-width: 4px; stroke-linejoin: round;
-}
+.pw-arrow-label { visibility: hidden; font-size: 12.5px; font-weight: 600; fill: var(--text-normal); }
+.pw-arrow-label-bg { visibility: hidden; fill: var(--background-primary); stroke-width: 1.5; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .18)); }
 .pw-highlighting .pw-arrow:not(.pw-hot) { opacity: .07; }
 .pw-arrow.pw-hot { opacity: 1; }
 .pw-arrow.pw-hot .pw-arrow-line { stroke-width: 2.6; }
-.pw-arrow.pw-hot .pw-arrow-label { display: block; }
+.pw-arrow.pw-hot .pw-arrow-label, .pw-arrow.pw-hot .pw-arrow-label-bg { visibility: visible; }
 
 .pw-legend { display: inline-flex; align-items: center; gap: 14px; margin-left: 16px; font-size: 11px; color: var(--text-muted); }
 .pw-legend-item { display: inline-flex; align-items: center; gap: 6px; }
@@ -542,3 +540,51 @@
 .pw-og-planning > .pw-chapter .pw-kind-icon { color: #e0a030; }
 .pw-og-planning .pw-orow { opacity: .85; }
 .pw-card-meta.is-planning .pw-chapter-chip::before { content: "💡 "; }
+
+/* ---------- linked note status & word count */
+.pw-note-status { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-size: 11px; color: var(--text-muted); white-space: nowrap; border-radius: 9px; padding: 0 2px; }
+.pw-note-status:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.pw-status-icon {
+  display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%;
+  background: color-mix(in srgb, var(--pw-status) 20%, transparent); color: var(--pw-status);
+  border: 1.5px solid var(--pw-status); flex-shrink: 0;
+}
+.pw-status-icon svg { width: 10px; height: 10px; stroke-width: 3; }
+.pw-status-name { color: var(--text-normal); font-weight: 500; }
+.pw-status-raw { font-size: 10.5px; padding: 0 6px; border-radius: 8px; border: 1px dashed var(--background-modifier-border); }
+.pw-status-file { display: inline-flex; }
+.pw-status-file svg { width: 12px; height: 12px; }
+.pw-words { font-variant-numeric: tabular-nums; }
+.pw-head-words { font-size: 10.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.pw-count-words { background: transparent; color: var(--text-faint); font-weight: 500; }
+.pw-status-row .pw-status-name-input { width: 130px; flex-shrink: 0; }
+.pw-status-row .pw-status-icon { width: 20px; height: 20px; }
+.pw-status-row .pw-status-icon svg { width: 12px; height: 12px; }
+.pw-status-list { margin-bottom: 10px; }
+
+.pw-card-top .pw-pov { flex-shrink: 0; }
+.pw-card-top .pw-status-raw { max-width: 74px; overflow: hidden; text-overflow: ellipsis; }
+.pw-card-top .pw-note-status { min-width: 0; }
+.pw-settings-desc { margin: 4px 0 8px; }
+
+/* ---------- stats strip: words and status across the scenes' notes */
+.pw-stats {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 6px 12px;
+  border-bottom: 1px solid var(--background-modifier-border); background: var(--background-primary);
+  font-size: var(--font-ui-small);
+}
+.pw-stat-words { display: flex; align-items: baseline; gap: 4px; }
+.pw-stat-num { font-weight: 700; font-size: 1.1em; font-variant-numeric: tabular-nums; color: var(--text-normal); }
+.pw-stat-label { color: var(--text-muted); }
+.pw-stat-progress { display: flex; width: 160px; height: 7px; border-radius: 4px; overflow: hidden; background: var(--background-modifier-border); gap: 1px; }
+.pw-stat-seg { min-width: 3px; }
+.pw-stat-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.pw-stat-chip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 4px; border-radius: 12px; cursor: pointer;
+  border: 1px solid transparent; color: var(--text-muted);
+}
+.pw-stat-chip:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.pw-stat-chip.is-active { border-color: var(--interactive-accent); background: color-mix(in srgb, var(--interactive-accent) 12%, transparent); color: var(--text-normal); }
+.pw-stat-chip.is-faint { padding-left: 8px; color: var(--text-faint); }
+.pw-stat-chip-n { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-normal); }
+.pw-stat-total { margin-left: auto; color: var(--text-faint); }

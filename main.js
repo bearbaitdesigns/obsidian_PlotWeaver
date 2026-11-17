@@ -24,8 +24,26 @@ const DEFAULT_SETTINGS = {
   defaultTemplate: '',
   askTemplate: true,
   addProperties: true,
+  statusField: 'status',
+  wordsField: 'words, wordcount, word-count, word_count',
+  statuses: null, // filled from DEFAULT_STATUSES
   fullscreenWindow: true,
 };
+/** Note statuses shown on cards. Each matches one or more property values (case-insensitive). */
+const DEFAULT_STATUSES = [
+  { name: 'Not started', match: 'not started, todo, to do, idea, planned', icon: 'circle', color: '#9a9aa3' },
+  { name: 'In progress', match: 'in progress, drafting, writing, wip, draft, started', icon: 'pencil', color: '#e0a030' },
+  { name: 'Revising', match: 'revising, revision, editing, needs revision, edit', icon: 'refresh-cw', color: '#9b6ad6' },
+  { name: 'Completed', match: 'completed, complete, done, finished, final', icon: 'check', color: '#5cb85c' },
+];
+const STATUS_ICONS = ['circle', 'pencil', 'refresh-cw', 'check', 'list', 'star', 'flag', 'alert-triangle', 'clock', 'eye', 'bookmark', 'x'];
+
+function fmtWords(w, long) {
+  if (w === null || w === undefined) return '';
+  if (long) return `${w.toLocaleString()} words`;
+  return w >= 1000 ? `${(w / 1000).toFixed(w >= 10000 ? 0 : 1).replace(/\.0$/, '')}k` : String(w);
+}
+
 const DEFAULT_UI = { mode: 'board', shelfTab: 'unplaced', shelfCollapsed: false, showArrows: true, showOffscreen: true, povFilter: 'all' };
 
 /** Book structure. A Part is a divider that groups the chapters after it; a card assigned to a Part is its summary. */
@@ -917,6 +935,8 @@ class PartModal extends Modal {
     stat('chapters', String(secs.length));
     stat('scenes', String(scenes.length));
     stat('POVs', String(new Set(scenes.map(b => b.povId).filter(Boolean)).size));
+    const pw = this.plugin.wordsOf(scenes);
+    if (pw !== null) stat('words', pw.toLocaleString());
 
     const lanes = n.plotlines.map(p => ({ p, k: scenes.filter(b => b.plotlineId === p.id).length })).filter(x => x.k);
     if (lanes.length) {
@@ -1217,6 +1237,7 @@ class PlotWeaverView extends ItemView {
 
     const n = this.novel;
     this.renderToolbar(root.createDiv('pw-toolbar'), n);
+    this.renderStats(root, n);
     const body = root.createDiv('pw-body');
     const main = body.createDiv('pw-main');
     if (this.ui.mode === 'outline') this.renderOutline(main, n);
@@ -1305,9 +1326,61 @@ class PlotWeaverView extends ItemView {
 
   matchesPov(b) {
     const f = this.ui.povFilter;
-    if (!f || f === 'all') return true;
-    if (f === 'none') return !b.povId;
-    return b.povId === f;
+    const povOk = !f || f === 'all' ? true : f === 'none' ? !b.povId : b.povId === f;
+    return povOk && (!this.ui.statusFilter || this.statusKey(b) === this.ui.statusFilter);
+  }
+
+  /** Which status bucket a card's note falls in: a status name, or one of the "__" buckets. */
+  statusKey(b) {
+    const m = this.plugin.noteMeta(b);
+    if (!m) return '__nonote';
+    if (m.def) return m.def.name;
+    return m.status ? '__other' : '__nostatus';
+  }
+
+  /** A strip under the toolbar summing up the scenes' notes: total words and how many scenes are at each status. */
+  renderStats(root, n) {
+    const scenes = n.beats.filter(b => NV.onBoard(n, b) && !b.offscreen && !NV.isSummary(n, b) && !NV.isPlanning(n, b));
+    if (!scenes.some(b => b.notePath)) { if (this.ui.statusFilter) this.ui.statusFilter = null; return; }
+    const bar = root.createDiv('pw-stats');
+    const words = this.plugin.wordsOf(scenes);
+    const w = bar.createDiv('pw-stat-words');
+    w.createSpan({ cls: 'pw-stat-num', text: words !== null ? words.toLocaleString() : '—' });
+    w.createSpan({ cls: 'pw-stat-label', text: 'words' });
+    const counts = new Map();
+    for (const b of scenes) { const k = this.statusKey(b); counts.set(k, (counts.get(k) || 0) + 1); }
+    const defs = this.plugin.data.settings.statuses || [];
+    const buckets = defs.map(d => ({ key: d.name, label: d.name, icon: d.icon, color: d.color }))
+      .concat([
+        { key: '__other', label: 'Other status', icon: 'help', color: 'var(--text-faint)' },
+        { key: '__nostatus', label: 'No status', icon: 'minus', color: 'var(--text-faint)' },
+        { key: '__nonote', label: 'No note', icon: 'file', color: 'var(--text-faint)' },
+      ]).filter(x => counts.get(x.key));
+    // A slim progress bar, one segment per status.
+    const prog = bar.createDiv('pw-stat-progress');
+    for (const x of buckets) {
+      const seg = prog.createDiv('pw-stat-seg');
+      seg.style.flex = String(counts.get(x.key));
+      seg.style.background = x.key.startsWith('__') ? 'var(--background-modifier-border)' : x.color;
+      seg.setAttr('aria-label', `${x.label}: ${plural(counts.get(x.key), 'scene')}`);
+    }
+    const chips = bar.createDiv('pw-stat-chips');
+    for (const x of buckets) {
+      const chip = chips.createDiv('pw-stat-chip');
+      chip.toggleClass('is-active', this.ui.statusFilter === x.key);
+      chip.toggleClass('is-faint', x.key.startsWith('__'));
+      if (!x.key.startsWith('__')) {
+        const ic = chip.createSpan('pw-status-icon');
+        ic.style.setProperty('--pw-status', x.color);
+        setIcon(ic, x.icon);
+      }
+      chip.createSpan({ cls: 'pw-stat-chip-label', text: x.label });
+      chip.createSpan({ cls: 'pw-stat-chip-n', text: String(counts.get(x.key)) });
+      chip.setAttr('aria-label', this.ui.statusFilter === x.key ? 'Show all scenes' : `Highlight scenes: ${x.label}`);
+      chip.onclick = () => this.setUi({ statusFilter: this.ui.statusFilter === x.key ? null : x.key });
+    }
+    const done = defs.length ? counts.get(defs[defs.length - 1].name) || 0 : 0;
+    bar.createDiv({ cls: 'pw-stat-total', text: `${plural(scenes.length, 'scene')}${defs.length && done ? ` · ${Math.round((done / scenes.length) * 100)}% ${defs[defs.length - 1].name.toLowerCase()}` : ''}` });
   }
 
   newBeat(preset) {
@@ -1451,7 +1524,8 @@ class PlotWeaverView extends ItemView {
       bar.createSpan({ cls: 'pw-part-title', text: part.title });
       const secs = NV.partSections(n, part);
       const scenes = n.beats.filter(b => NV.onBoard(n, b) && !b.offscreen && secs.some(c => c.id === b.chapterId)).length;
-      bar.createSpan({ cls: 'pw-part-meta', text: `${plural(secs.length, 'chapter')} · ${plural(scenes, 'scene')}` });
+      const pw = this.plugin.wordsOf(n.beats.filter(b => NV.onBoard(n, b) && secs.some(c => c.id === b.chapterId)));
+      bar.createSpan({ cls: 'pw-part-meta', text: `${plural(secs.length, 'chapter')} · ${plural(scenes, 'scene')}${pw !== null ? ` · ${fmtWords(pw)} words` : ''}` });
       const sums = n.beats.filter(b => b.chapterId === part.id && b.status === 'active');
       if (sums.length) {
         const chip = bar.createSpan({ cls: 'pw-part-chip', text: plural(sums.length, 'summary card') });
@@ -1523,6 +1597,8 @@ class PlotWeaverView extends ItemView {
     const label = h.createSpan({ cls: 'pw-slot-label', text: col.label || 'Untitled' });
     label.setAttr('aria-label', 'Double-click to rename · drag to reorder');
     const count = n.beats.filter(b => b.chapterId === col.id && NV.onBoard(n, b)).length;
+    const cw = col.id ? this.plugin.wordsOf(n.beats.filter(b => b.chapterId === col.id && NV.onBoard(n, b))) : null;
+    if (cw !== null) h.createSpan({ cls: 'pw-head-words', text: fmtWords(cw) }).setAttr('aria-label', fmtWords(cw, true));
     if (count) h.createSpan({ cls: 'pw-count', text: String(count) });
     const more = h.createDiv('pw-icon-btn');
     setIcon(more, 'more-horizontal');
@@ -1671,12 +1747,7 @@ class PlotWeaverView extends ItemView {
       const t = top.createSpan({ cls: 'pw-tag pw-tag-inf', text: [inN ? `←${inN}` : '', outN ? `${outN}→` : ''].filter(Boolean).join(' ') });
       t.setAttr('aria-label', `Shaped by ${inN} · leads to ${outN}`);
     }
-    if (b.notePath) {
-      const l = top.createSpan('pw-tag pw-link');
-      setIcon(l, 'file-text');
-      l.setAttr('aria-label', 'Open linked note');
-      l.onclick = e => { e.stopPropagation(); this.plugin.openNote(n, b); };
-    }
+    if (b.notePath) this.renderNoteStatus(top, n, b);
     const fold = top.createDiv('pw-icon-btn pw-fold-btn');
     setIcon(fold, folded ? 'chevron-down' : 'chevron-up');
     fold.setAttr('aria-label', folded ? 'Expand card' : 'Collapse card to its title and POV');
@@ -1728,6 +1799,32 @@ class PlotWeaverView extends ItemView {
       }
     }
     return card;
+  }
+
+  /** The linked note's status icon and word count, from its properties. Click to open the note. */
+  renderNoteStatus(parent, n, b, long) {
+    const meta = this.plugin.noteMeta(b);
+    const box = parent.createSpan('pw-note-status');
+    box.onclick = e => { e.stopPropagation(); this.plugin.openNote(n, b); };
+    box.addEventListener('dblclick', e => e.stopPropagation());
+    const tip = ['Open linked note'];
+    if (meta && meta.def) {
+      const ic = box.createSpan('pw-status-icon');
+      ic.style.setProperty('--pw-status', meta.def.color || 'var(--text-muted)');
+      setIcon(ic, meta.def.icon || 'circle');
+      if (long) box.createSpan({ cls: 'pw-status-name', text: meta.def.name });
+      tip.unshift(`Status: ${meta.def.name}${meta.status && meta.status.toLowerCase() !== String(meta.def.name).toLowerCase() ? ` (“${meta.status}”)` : ''}`);
+    } else if (meta && meta.status) {
+      box.createSpan({ cls: 'pw-status-raw', text: meta.status });
+      tip.unshift(`Status: “${meta.status}” (not one of your statuses; add it in settings)`);
+    } else {
+      setIcon(box.createSpan('pw-status-file'), 'file-text');
+    }
+    if (meta && meta.words !== null) {
+      box.createSpan({ cls: 'pw-words', text: long ? fmtWords(meta.words, true) : fmtWords(meta.words) });
+      tip.splice(1, 0, fmtWords(meta.words, true));
+    }
+    box.setAttr('aria-label', tip.join(' · '));
   }
 
   /* ---------- drag a link from one card to another */
@@ -2044,6 +2141,8 @@ class PlotWeaverView extends ItemView {
         const nScenes = g.items.filter(b => !b.offscreen && !NV.isSummary(n, b)).length;
         if (kind === 'planning') sec.createDiv({ cls: 'pw-muted pw-loose-hint', text: 'Planning: on the board, not in the manuscript. Drag cards into chapters, or turn this into a chapter, when you’re ready.' });
         if (kind !== 'part' || nScenes) gh.createSpan({ cls: 'pw-count', text: plural(nScenes, 'scene') });
+        const gw = this.plugin.wordsOf(kind === 'part' ? n.beats.filter(b => NV.partSections(n, ch).some(x => x.id === b.chapterId) && NV.onBoard(n, b)) : g.items);
+        if (gw !== null) gh.createSpan({ cls: 'pw-count pw-count-words', text: fmtWords(gw, true) });
         gh.createDiv('pw-spacer');
         const more = gh.createDiv('pw-icon-btn');
         setIcon(more, 'more-horizontal');
@@ -2113,7 +2212,7 @@ class PlotWeaverView extends ItemView {
     if (pov) { const badge = top.createSpan({ cls: 'pw-pov', text: pov.name }); badge.style.setProperty('--pw-pov', pov.color); }
     top.createSpan({ cls: 'pw-plot-chip', text: p.name });
     if (jump) top.createSpan({ cls: 'pw-tag pw-tag-jump', text: '↺ jump back' });
-    if (b.notePath) { const l = top.createSpan('pw-tag pw-link'); setIcon(l, 'file-text'); l.onclick = e => { e.stopPropagation(); this.plugin.openNote(n, b); }; }
+    if (b.notePath) this.renderNoteStatus(top, n, b, true);
     if (b.summary) body.createDiv({ cls: 'pw-osummary', text: b.summary });
     this.renderInfluences(body, n, b);
     const more = row.createDiv('pw-icon-btn');
@@ -2328,6 +2427,7 @@ class PlotWeaverView extends ItemView {
     const gr = grid.getBoundingClientRect();
     const box = el => { const r = el.getBoundingClientRect(); return { x: r.left - gr.left, y: r.top - gr.top, w: r.width, h: r.height }; };
     const HEAD_L = 9, HEAD_W = 9;
+    const pills = [];
     const f = v => v.toFixed(1);
     const add = (p, v, k) => ({ x: p.x + v.x * k, y: p.y + v.y * k });
     const sources = n.beats.concat(...[...(this.extHome || new Map()).keys()].map(id => { const f = this.findBeat(id); return f ? [f.b] : []; }));
@@ -2363,9 +2463,22 @@ class PlotWeaverView extends ItemView {
           const label = svg('text', { x: f(mx), y: f(my - 6), class: 'pw-arrow-label', 'text-anchor': 'middle' });
           label.textContent = inf.note.length > 48 ? `${inf.note.slice(0, 47)}…` : inf.note;
           g.appendChild(label);
+          pills.push({ g, label, color });
         }
         sv.appendChild(g);
       }
+    // Each label gets a solid rounded background so it reads clearly over cards and other links.
+    for (const pl of pills) {
+      let bb;
+      try { bb = pl.label.getBBox(); } catch (err) { bb = null; }
+      if (!bb || !bb.width) continue;
+      const pad = 5;
+      const rect = svg('rect', {
+        x: (bb.x - pad).toFixed(1), y: (bb.y - pad / 2 - 1).toFixed(1), width: (bb.width + pad * 2).toFixed(1), height: (bb.height + pad + 2).toFixed(1),
+        rx: '6', class: 'pw-arrow-label-bg', stroke: pl.color,
+      });
+      pl.g.insertBefore(rect, pl.label);
+    }
     }
   }
 }
@@ -2395,6 +2508,46 @@ class PlotWeaverSettingTab extends PluginSettingTab {
       .addToggle(t => t.setValue(s.addProperties).onChange(v => { s.addProperties = v; this.plugin.requestSave(); }));
     const vars = c.createDiv('pw-muted pw-vars');
     vars.setText('Template variables: {{title}} {{summary}} {{novel}} {{plotline}} {{pov}} {{chapter}} {{part}} {{offscreen}} {{status}} {{shapedBy}} {{leadsTo}} {{date}} {{time}} {{id}}. Anything else (e.g. Templater <% %> code) is left untouched.');
+
+    c.createEl('h3', { text: 'Note status and word count' });
+    c.createDiv({ cls: 'pw-muted pw-settings-desc', text: 'Cards with a linked note show the note’s status as an icon, and its word count, read from the note’s properties.' });
+    new Setting(c).setName('Status property').setDesc('The property that holds the note’s status.')
+      .addText(t => t.setPlaceholder('status').setValue(s.statusField).onChange(v => { s.statusField = v.trim(); this.plugin.commit(); }));
+    new Setting(c).setName('Word count property').setDesc('The property that holds the word count. List several, separated by commas; the first one found is used.')
+      .addText(t => t.setPlaceholder('words').setValue(s.wordsField).onChange(v => { s.wordsField = v.trim(); this.plugin.commit(); }));
+    const list = c.createDiv('pw-status-list');
+    list.createDiv({ cls: 'pw-muted', text: 'Statuses: the name shown, the property values that count as it (comma-separated, any case), its icon and colour.' });
+    (s.statuses || []).forEach((st, i) => {
+      const row = list.createDiv('pw-mrow pw-status-row');
+      const prev = row.createSpan('pw-status-icon');
+      prev.style.setProperty('--pw-status', st.color);
+      setIcon(prev, st.icon);
+      const name = row.createEl('input', { type: 'text', cls: 'pw-status-name-input' });
+      name.value = st.name; name.placeholder = 'Name';
+      name.oninput = () => { st.name = name.value; this.plugin.commit(); };
+      const match = row.createEl('input', { type: 'text', cls: 'pw-mdesc' });
+      match.value = st.match; match.placeholder = 'Values, e.g. done, finished';
+      match.oninput = () => { st.match = match.value; this.plugin.commit(); };
+      const icon = row.createEl('select', { cls: 'dropdown' });
+      for (const ic of STATUS_ICONS) icon.createEl('option', { value: ic, text: ic });
+      icon.value = st.icon;
+      icon.onchange = () => { st.icon = icon.value; this.plugin.commit(); this.display(); };
+      const col = row.createEl('input', { type: 'color' });
+      col.value = st.color;
+      col.onchange = () => { st.color = col.value; this.plugin.commit(); this.display(); };
+      const up = row.createDiv('pw-icon-btn'); setIcon(up, 'arrow-up'); up.setAttr('aria-label', 'Move up');
+      up.onclick = () => { NV.moveItem(s.statuses, i, i - 1); this.plugin.commit(); this.display(); };
+      const del = row.createDiv('pw-icon-btn pw-danger'); setIcon(del, 'trash-2'); del.setAttr('aria-label', 'Remove');
+      del.onclick = () => { s.statuses.splice(i, 1); this.plugin.commit(); this.display(); };
+    });
+    const btns = list.createDiv('pw-add-kinds');
+    btns.createEl('button', { text: '＋ Add status', cls: 'pw-small-btn' }).onclick = () => {
+      s.statuses.push({ name: 'New status', match: '', icon: 'flag', color: PALETTE[s.statuses.length % PALETTE.length] });
+      this.plugin.commit(); this.display();
+    };
+    btns.createEl('button', { text: 'Reset to defaults', cls: 'pw-small-btn' }).onclick = () => {
+      s.statuses = clone(DEFAULT_STATUSES); this.plugin.commit(); this.display();
+    };
 
     c.createEl('h3', { text: 'Board' });
     new Setting(c).setName('Full screen fills the display').setDesc('When you turn on full screen, also make the Obsidian window full screen (desktop). Off: the board just fills the Obsidian window.')
@@ -2437,6 +2590,9 @@ class PlotWeaverPlugin extends Plugin {
     this.addCommand({ id: 'add-example', name: 'Add example series (linked novels)', callback: () => { this.addSeries(makeExampleSeries()); this.activateView(); } });
     this.addSettingTab(new PlotWeaverSettingTab(this.app, this));
 
+    this.registerEvent(this.app.metadataCache.on('changed', file => {
+      if (this.data.novels.some(n => n.beats.some(b => b.notePath === file.path))) this.refreshViewsSoon();
+    }));
     this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
       let hit = false;
       for (const n of this.data.novels) for (const b of n.beats) if (b.notePath === oldPath) { b.notePath = file.path; hit = true; }
@@ -2463,6 +2619,7 @@ class PlotWeaverPlugin extends Plugin {
       settings: Object.assign({}, DEFAULT_SETTINGS, d.settings),
       ui: Object.assign({}, DEFAULT_UI, d.ui, d.ui && d.ui.showShelf === false && d.ui.shelfCollapsed === undefined ? { shelfCollapsed: true } : {}),
     };
+    if (!Array.isArray(this.data.settings.statuses)) this.data.settings.statuses = clone(DEFAULT_STATUSES);
     if (!this.data.novels.length) {
       const series = makeExampleSeries();
       this.data.novels.push(...series);
@@ -2631,6 +2788,38 @@ class PlotWeaverPlugin extends Plugin {
       cur = cur ? `${cur}/${part}` : part;
       if (!this.app.vault.getAbstractFileByPath(cur)) await this.app.vault.createFolder(cur);
     }
+  }
+  /** Status and word count from a linked note's properties (frontmatter). Null when there's no readable note. */
+  noteMeta(b) {
+    if (!b || !b.notePath) return null;
+    const f = this.app.vault.getAbstractFileByPath(b.notePath);
+    if (!(f instanceof TFile)) return null;
+    const cache = this.app.metadataCache.getFileCache(f);
+    const fm = (cache && cache.frontmatter) || {};
+    const s = this.data.settings;
+    const keys = Object.keys(fm);
+    const read = names => {
+      for (const want of String(names || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean)) {
+        const k = keys.find(x => x.toLowerCase() === want);
+        if (k !== undefined && fm[k] !== null && fm[k] !== '') return fm[k];
+      }
+      return undefined;
+    };
+    let raw = read(s.statusField);
+    if (Array.isArray(raw)) raw = raw[0];
+    const status = raw === undefined ? '' : String(raw).trim();
+    let w = read(s.wordsField);
+    if (Array.isArray(w)) w = w[0];
+    const words = w === undefined ? null : (Number.isFinite(+String(w).replace(/[,\s_]/g, '')) ? Math.round(+String(w).replace(/[,\s_]/g, '')) : null);
+    const key = status.toLowerCase();
+    const def = key ? (s.statuses || []).find(d => String(d.match || '').split(',').map(x => x.trim().toLowerCase()).concat([String(d.name || '').toLowerCase()]).includes(key)) : null;
+    return { status, def: def || null, words };
+  }
+  /** Total words across cards (from their notes' word-count property). */
+  wordsOf(beats) {
+    let total = 0, any = false;
+    for (const b of beats) { const m = this.noteMeta(b); if (m && m.words !== null) { total += m.words; any = true; } }
+    return any ? total : null;
   }
   noteVars(n, b) {
     const p = NV.plotline(n, b.plotlineId), pov = NV.pov(n, b.povId), s = NV.timeOf(n, b);
