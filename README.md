@@ -10,6 +10,7 @@ An Obsidian plugin for outlining a novel with **several plotlines running at onc
 
   Drag cards between cells and reorder them within a cell. Drag row and column headers to reorder them.
 - **Parts, prologues, interludes and epilogues.** Sections can be Chapters, Parts, a Prologue, Interludes or an Epilogue. A Part groups the chapters after it, and a card placed in a Part becomes that part’s summary. Manage them in *Manage → Chapters & parts*, from the **Section** button, or from a heading’s ⋯ menu (“Make it a Part”…).
+- **Collapsible cards.** Fold any card down to its title and POV tag with the ⌃ button on the card (or its ⋯ menu), or use **Collapse all / Expand all** in the toolbar for a compact overview. Each card remembers its state.
 - **Multiple POVs.** Each scene can have a POV character, shown as a coloured badge. The POV filter fades out the other characters’ scenes.
 - **Off-screen events.** Events that happen in the story world but aren’t on the page. They sit on their plotline, can influence other events, and appear in the Outline at their point in story time.
 - **Influences.** Link any event to the events it causes, with a note on how. Hover over a card and drag its **→** handle onto another card to draw a link, or add links in the edit dialog. Links are drawn as arrows on the board. Hover over a card to trace them and read the notes.

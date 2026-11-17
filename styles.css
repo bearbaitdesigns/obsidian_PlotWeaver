@@ -474,3 +474,12 @@
 .pw-link-pair { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; font-weight: 600; }
 .pw-link-end { padding: 3px 8px; border-radius: 6px; background: var(--background-modifier-hover); }
 .pw-link-arrow { color: var(--interactive-accent); font-size: 1.2em; }
+
+/* ---------- collapsed cards: title and POV only */
+.pw-fold-btn { opacity: 0; }
+.pw-card:hover .pw-fold-btn, .pw-card-collapsed .pw-fold-btn { opacity: .65; }
+.pw-fold-btn:hover { opacity: 1; }
+.pw-card.pw-card-collapsed { padding: 4px 8px 5px; }
+.pw-card.pw-card-collapsed .pw-card-top { margin-bottom: 0; min-height: 18px; }
+.pw-card.pw-card-collapsed .pw-card-title { font-size: 12.5px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pw-cell:has(.pw-card-collapsed) { gap: 6px; }

@@ -1163,6 +1163,14 @@ class PlotWeaverView extends ItemView {
     pov.value = valid ? this.ui.povFilter : 'all';
     pov.onchange = () => this.setUi({ povFilter: pov.value });
     this.tbButton(g2, 'eye-off', 'Off-screen', () => this.setUi({ showOffscreen: !this.ui.showOffscreen }), this.ui.showOffscreen, 'Show off-screen events (board and outline)');
+    // Every card on the board, including events shown from linked novels.
+    const shown = n.beats.filter(b => NV.onBoard(n, b))
+      .concat(...XN.externals(this.novels, n).map(g => g.beats));
+    const anyOpen = shown.some(b => !b.collapsed);
+    this.tbButton(g2, anyOpen ? 'fold-vertical' : 'unfold-vertical', anyOpen ? 'Collapse all' : 'Expand all', () => {
+      for (const b of shown) b.collapsed = anyOpen;
+      this.plugin.commit();
+    }, undefined, anyOpen ? 'Collapse every card to its title and POV' : 'Expand every card');
     this.tbButton(g2, 'git-merge', 'Influences', () => this.setUi({ showArrows: !this.ui.showArrows }), this.ui.showArrows, 'Draw cause-and-effect arrows');
     this.tbButton(g2, 'inbox', 'Shelf', () => this.setUi({ shelfCollapsed: !this.ui.shelfCollapsed }), !this.ui.shelfCollapsed, this.ui.shelfCollapsed ? 'Expand the idea shelf' : 'Collapse the idea shelf');
 
@@ -1460,6 +1468,8 @@ class PlotWeaverView extends ItemView {
     card.dataset.id = b.id;
     card.style.setProperty('--pw-color', p ? p.color : 'var(--text-faint)');
     const external = where === 'external';
+    const folded = !!b.collapsed;
+    card.toggleClass('pw-card-collapsed', folded);
     if (b.offscreen) card.addClass('pw-offscreen');
     if (external) card.addClass('pw-external');
     else if (!this.matchesPov(b)) card.addClass('pw-dim');
@@ -1472,7 +1482,8 @@ class PlotWeaverView extends ItemView {
     if (b.offscreen) {
       const t = top.createSpan('pw-tag pw-tag-off');
       setIcon(t, 'eye-off');
-      t.createSpan({ text: 'off-screen' });
+      if (folded) t.setAttr('aria-label', 'Off-screen');
+      else t.createSpan({ text: 'off-screen' });
     }
     top.createDiv('pw-spacer');
     const outN = b.influences.length;
@@ -1487,11 +1498,20 @@ class PlotWeaverView extends ItemView {
       l.setAttr('aria-label', 'Open linked note');
       l.onclick = e => { e.stopPropagation(); this.plugin.openNote(n, b); };
     }
+    const fold = top.createDiv('pw-icon-btn pw-fold-btn');
+    setIcon(fold, folded ? 'chevron-down' : 'chevron-up');
+    fold.setAttr('aria-label', folded ? 'Expand card' : 'Collapse card to its title and POV');
+    fold.onclick = e => { e.stopPropagation(); b.collapsed = !folded; this.plugin.commit(); };
+    fold.addEventListener('dblclick', e => e.stopPropagation());
     const more = top.createDiv('pw-icon-btn');
     setIcon(more, 'more-horizontal');
     more.onclick = e => { e.stopPropagation(); if (external) this.externalMenu(e, n, b); else this.cardMenu(e, n, b); };
 
     card.createDiv({ cls: 'pw-card-title', text: b.title || 'Untitled' });
+    if (folded) {
+      if (b.summary) card.setAttr('aria-label', b.summary);
+      if (NV.isSummary(n, b)) card.addClass('pw-summary-card');
+    } else {
     if (b.summary) card.createDiv({ cls: 'pw-card-summary', text: b.summary });
     const slot = NV.timeOf(n, b);
     const ch = NV.hasChapter(n, b) ? NV.chapter(n, b.chapterId) : null;
@@ -1513,9 +1533,10 @@ class PlotWeaverView extends ItemView {
     } else if (!b.offscreen && n.chapters.length && !NV.isSummary(n, b)) {
       card.createDiv({ cls: 'pw-card-meta pw-faint', text: 'no chapter yet' });
     }
+    }
 
     card.draggable = !external;
-    if (external) card.setAttr('aria-label', `From “${n.title}”: double-click to edit it there`);
+    if (external) card.setAttr('aria-label', `From “${n.title}”: double-click to edit it there${folded && b.summary ? `\n${b.summary}` : ''}`);
     card.addEventListener('dragstart', e => {
       e.stopPropagation();
       if (external || this.linking) { e.preventDefault(); return; }
@@ -1652,6 +1673,7 @@ class PlotWeaverView extends ItemView {
     const m = new Menu();
     const commit = () => this.plugin.commit();
     m.addItem(it => it.setTitle('Edit…').setIcon('pencil').onClick(() => this.editBeat(b)));
+    m.addItem(it => it.setTitle(b.collapsed ? 'Expand card' : 'Collapse card').setIcon(b.collapsed ? 'chevron-down' : 'chevron-up').onClick(() => { b.collapsed = !b.collapsed; commit(); }));
     if (b.notePath) {
       m.addItem(it => it.setTitle('Open linked note').setIcon('file-text').onClick(() => this.plugin.openNote(n, b)));
       m.addItem(it => it.setTitle('Unlink note').setIcon('unlink').onClick(() => { b.notePath = null; commit(); }));
