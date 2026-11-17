@@ -520,6 +520,30 @@ class ConfirmModal extends Modal {
   onClose() { this.contentEl.empty(); }
 }
 
+/** After drawing a link: optionally say how the cause leads to the effect, or take the link back. */
+class LinkNoteModal extends Modal {
+  constructor(app, from, to, onSave, onUndo) { super(app); Object.assign(this, { from, to, onSave, onUndo }); }
+  onOpen() {
+    this.modalEl.addClass('pw-modal', 'pw-link-modal');
+    this.titleEl.setText('New cause → effect');
+    const pair = this.contentEl.createDiv('pw-link-pair');
+    pair.createSpan({ cls: 'pw-link-end', text: this.from });
+    pair.createSpan({ cls: 'pw-link-arrow', text: '→' });
+    pair.createSpan({ cls: 'pw-link-end', text: this.to });
+    const input = this.contentEl.createEl('input', { type: 'text', cls: 'pw-prompt-input' });
+    input.placeholder = 'How does it lead there? (optional)';
+    const save = () => { const v = input.value.trim(); this.close(); if (v) this.onSave(v); };
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+    const foot = this.contentEl.createDiv('pw-modal-footer');
+    foot.createEl('button', { text: 'Undo link' }).onclick = () => { this.close(); this.onUndo(); };
+    foot.createDiv('pw-spacer');
+    foot.createEl('button', { text: 'Skip' }).onclick = () => this.close();
+    foot.createEl('button', { text: 'Save', cls: 'mod-cta' }).onclick = save;
+    setTimeout(() => input.focus(), 20);
+  }
+  onClose() { this.contentEl.empty(); }
+}
+
 class ColorModal extends Modal {
   constructor(app, title, current, onPick) { super(app); Object.assign(this, { heading: title, current, onPick }); }
   onOpen() {
@@ -1245,12 +1269,12 @@ class PlotWeaverView extends ItemView {
       if (!n.chapters.length) addLane.createSpan({ cls: 'pw-muted', text: '  · No chapters yet: add one with ＋ at the top right.' });
     }
 
-    if (this.ui.showArrows && (n.beats.some(b => b.influences.length) || ext.some(g => g.beats.length))) {
+    if (this.ui.showArrows && n.beats.length) {
       const lg = addLane.createDiv('pw-legend');
       const item = (cls, text) => { const it = lg.createSpan('pw-legend-item'); it.createSpan(cls); it.createSpan({ text }); };
       item('pw-lg-solid', 'cause → effect');
       item('pw-lg-dashed', 'off-screen cause');
-      lg.createSpan({ cls: 'pw-legend-hint', text: 'Hover a card to trace its links and read the notes.' });
+      lg.createSpan({ cls: 'pw-legend-hint', text: 'Hover a card to trace its links. Drag a card’s → handle onto another card to link them.' });
     }
 
     this.svgEl = svg('svg', { class: 'pw-svg' });
@@ -1494,7 +1518,7 @@ class PlotWeaverView extends ItemView {
     if (external) card.setAttr('aria-label', `From “${n.title}”: double-click to edit it there`);
     card.addEventListener('dragstart', e => {
       e.stopPropagation();
-      if (external) { e.preventDefault(); return; }
+      if (external || this.linking) { e.preventDefault(); return; }
       this.drag = { kind: 'beat', id: b.id, source: where === 'shelf' ? 'shelf' : 'board' };
       if (e.dataTransfer) { e.dataTransfer.setData('text/plain', b.title); e.dataTransfer.effectAllowed = 'move'; }
       setTimeout(() => card.addClass('pw-dragging'), 0);
@@ -1503,11 +1527,104 @@ class PlotWeaverView extends ItemView {
     card.addEventListener('dblclick', e => { e.stopPropagation(); if (external) new BeatModal(this.plugin, n, b, false).open(); else this.editBeat(b); });
     card.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); if (external) this.externalMenu(e, n, b); else this.cardMenu(e, n, b); });
     if (where !== 'shelf') {
-      card.addEventListener('mouseenter', () => this.highlight(b.id));
-      card.addEventListener('mouseleave', () => this.highlight(null));
+      card.addEventListener('mouseenter', () => { if (!this.linking) this.highlight(b.id); });
+      card.addEventListener('mouseleave', () => { if (!this.linking) this.highlight(null); });
       this.cardEls.set(b.id, card);
+      if (this.ui.showArrows) {
+        const handle = card.createDiv('pw-link-handle');
+        setIcon(handle, 'arrow-right');
+        handle.setAttr('aria-label', 'Drag onto another card to link: this leads to that');
+        handle.addEventListener('pointerdown', e => this.startLink(e, b, card));
+        handle.addEventListener('dblclick', e => e.stopPropagation());
+      }
     }
     return card;
+  }
+
+  /* ---------- drag a link from one card to another */
+
+  startLink(e, b, card) {
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const grid = this.gridEl, sv = this.svgEl;
+    if (!grid || !sv) return;
+    this.highlight(null);
+    const temp = svg('g', { class: 'pw-link-temp' });
+    const path = svg('path', { d: '' });
+    const tip = svg('circle', { r: '4.5' });
+    temp.appendChild(path);
+    temp.appendChild(tip);
+    sv.appendChild(temp);
+    card.addClass('pw-link-source');
+    this.contentEl.addClass('pw-linking');
+    const L = this.linking = { id: b.id, card, temp, path, tip, target: null };
+
+    const toGrid = (x, y) => { const r = grid.getBoundingClientRect(); return { x: x - r.left, y: y - r.top }; };
+    const move = ev => {
+      const g = grid.getBoundingClientRect(), c = card.getBoundingClientRect();
+      const p = toGrid(ev.clientX, ev.clientY);
+      const leftward = ev.clientX < c.left + c.width / 2;
+      const x1 = (leftward ? c.left : c.right) - g.left, y1 = c.top + c.height / 2 - g.top;
+      const dx = Math.max(24, Math.abs(p.x - x1) / 2) * (leftward ? -1 : 1);
+      path.setAttribute('d', `M${x1},${y1} C${x1 + dx},${y1} ${p.x - dx},${p.y} ${p.x},${p.y}`);
+      tip.setAttribute('cx', p.x); tip.setAttribute('cy', p.y);
+      // Which card is under the pointer?
+      const under = document.elementFromPoint(ev.clientX, ev.clientY);
+      const hit = under && under.closest ? under.closest('.pw-card') : null;
+      const ok = hit && grid.contains(hit) && hit.dataset.id && hit.dataset.id !== b.id ? hit : null;
+      if (L.target !== ok) {
+        if (L.target) L.target.removeClass('pw-link-target');
+        L.target = ok;
+        if (ok) ok.addClass('pw-link-target');
+      }
+      // Scroll the board when dragging near its edges.
+      const sc = this.boardScroller;
+      if (sc) {
+        const r = sc.getBoundingClientRect(), edge = 40, step = 14;
+        if (ev.clientX > r.right - edge) sc.scrollLeft += step; else if (ev.clientX < r.left + edge + 160) sc.scrollLeft -= step;
+        if (ev.clientY > r.bottom - edge) sc.scrollTop += step; else if (ev.clientY < r.top + edge) sc.scrollTop -= step;
+      }
+    };
+    const finish = commit => {
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('keydown', key, true);
+      temp.remove();
+      card.removeClass('pw-link-source');
+      if (L.target) L.target.removeClass('pw-link-target');
+      this.contentEl.removeClass('pw-linking');
+      this.linking = null;
+      if (commit && L.target) this.createLink(b.id, L.target.dataset.id);
+    };
+    const up = () => finish(true);
+    const key = ev => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); finish(false); } };
+    window.addEventListener('pointermove', move, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('keydown', key, true);
+    move(e);
+  }
+
+  /** Make "from leads to to": within this novel, or from a linked novel's event into this one. */
+  createLink(fromId, toId) {
+    const n = this.novel;
+    const S = this.findBeat(fromId), T = this.findBeat(toId);
+    if (!S || !T || S.b.id === T.b.id) return;
+    if (T.home.id !== n.id) {
+      new Notice(`“${T.b.title}” is in “${T.home.title}”. Links run from the novels this one draws on into this one, not back.`);
+      return;
+    }
+    if (S.b.influences.some(i => i.to === T.b.id && XN.targetNovelId(S.home, i) === n.id)) {
+      new Notice(`“${S.b.title}” already leads to “${T.b.title}”.`);
+      return;
+    }
+    const inf = { to: T.b.id, note: '' };
+    if (S.home.id !== n.id) inf.novel = n.id;
+    S.b.influences.push(inf);
+    this.plugin.commit();
+    new LinkNoteModal(this.app, S.b.title, T.b.title,
+      note => { inf.note = note; this.plugin.commit(); },
+      () => { S.b.influences = S.b.influences.filter(i => i !== inf); this.plugin.commit(); new Notice('Link removed.'); }).open();
   }
 
   pickChapter(n, b) {

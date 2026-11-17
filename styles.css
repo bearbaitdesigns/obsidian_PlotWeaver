@@ -452,3 +452,25 @@
 .pw-mrow.is-in-part { padding-left: 18px; }
 .pw-kind-select { width: 112px; flex-shrink: 0; }
 .pw-add-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+
+/* ---------- drag a link between cards */
+.pw-link-handle {
+  position: absolute; right: -9px; top: 50%; transform: translateY(-50%); z-index: 4;
+  width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: var(--background-primary); color: var(--interactive-accent);
+  border: 1.5px solid var(--interactive-accent); box-shadow: 0 1px 3px rgba(0, 0, 0, .15);
+  cursor: crosshair; opacity: 0; transition: opacity .12s, transform .12s; touch-action: none;
+}
+.pw-link-handle svg { width: 11px; height: 11px; }
+.pw-card:hover > .pw-link-handle, .pw-card.pw-link-source > .pw-link-handle { opacity: 1; }
+.pw-link-handle:hover { transform: translateY(-50%) scale(1.15); background: var(--interactive-accent); color: var(--text-on-accent); }
+.pw-linking, .pw-linking * { cursor: crosshair !important; user-select: none; }
+.pw-linking .pw-svg { z-index: 3; }
+.pw-linking .pw-arrow { opacity: .2; }
+.pw-link-temp path { fill: none; stroke: var(--interactive-accent); stroke-width: 2.5; stroke-dasharray: 6 4; }
+.pw-link-temp circle { fill: var(--interactive-accent); stroke: var(--background-primary); stroke-width: 1.5; }
+.pw-card.pw-link-source { box-shadow: 0 0 0 2px var(--interactive-accent); }
+.pw-card.pw-link-target { box-shadow: 0 0 0 3px var(--interactive-accent), 0 4px 14px rgba(0, 0, 0, .18); }
+.pw-link-pair { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; font-weight: 600; }
+.pw-link-end { padding: 3px 8px; border-radius: 6px; background: var(--background-modifier-hover); }
+.pw-link-arrow { color: var(--interactive-accent); font-size: 1.2em; }
