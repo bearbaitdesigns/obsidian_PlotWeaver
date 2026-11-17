@@ -17,6 +17,7 @@ An Obsidian plugin for outlining a novel with **several plotlines running at onc
 - **Scene notes.** Create a note for any scene from one of your templates, or link a note you already have.
 - **Export.** Write the whole outline (manuscript, story-world timeline and shelves) to a markdown note.
 - **Full screen.** The board fills the whole display; Esc or the ⤡ button exits. Dialogs and menus still work while it’s on.
+- **Linked novels.** A novel can draw on others, such as a worldbuilding history or earlier books in a series. Events in those novels can shape events in this one: pick them under **Shaped by** or **Leads to** in an event’s edit dialog. On the board, a **From linked novels** column shows each outside event beside the plotline it affects, with an arrow into the scene. The Outline, exports and note templates show cross-book links too. Set links in *Manage → Novel → Linked novels*, or from the chip next to the novel menu.
 - **Several novels.** Switch between them from the toolbar.
 
 ## Install with BRAT
@@ -54,7 +55,7 @@ Anything else, including Templater `<% %>` code, is left untouched. Plot Weaver 
 - **Capture an idea**: adds an idea to the Unplaced shelf from anywhere
 - **Manage plotlines, POVs, story time and chapters**
 - **Export outline to note**
-- **Add example novel**
+- **Add example series (linked novels)**
 
 ## Notes
 

@@ -80,7 +80,11 @@ function normalizeNovel(n) {
   n.manuscriptOrder = n.manuscriptOrder || [];
   n.beats = (n.beats || []).map(b => makeBeat(b));
   const ids = new Set(n.beats.map(b => b.id));
-  for (const b of n.beats) b.influences = (b.influences || []).filter(i => i && ids.has(i.to) && i.to !== b.id);
+  n.links = Array.isArray(n.links) ? n.links.filter(x => x && x !== n.id) : [];
+  for (const b of n.beats) {
+    b.influences = (b.influences || []).filter(i => i && i.to && (i.novel && i.novel !== n.id ? true : ids.has(i.to) && i.to !== b.id));
+    for (const i of b.influences) if (i.novel === n.id) delete i.novel;
+  }
   if (!Array.isArray(n.chapters)) {
     // Migrate v1 free-text chapter labels into chapter objects, in reading order.
     n.chapters = [];
@@ -138,6 +142,54 @@ function makeExampleNovel() {
   void fence;
   n.manuscriptOrder = [offer, reassign, forge, rota, flash, paper, breakin, fake].map(b => b.id);
   return n;
+}
+
+/** A linked example series: a worldbuilding history that feeds Book 1, and Book 2 that draws on both. */
+function makeExampleSeries() {
+  const world = {
+    id: uid(), title: 'Lantern World (worldbuilding)', povs: [], chapters: [], beats: [], manuscriptOrder: [], links: [],
+    plotlines: [
+      { id: uid(), name: 'History of the Lantern', color: '#7a8b99', description: 'How the Harrow Lantern came to be.', archived: false, collapsed: false },
+      { id: uid(), name: 'Rise of the Syndicate', color: '#9b6ad6', description: 'The organisation behind everything.', archived: false, collapsed: false },
+    ],
+    slots: ['Three centuries ago', 'Fifty years ago', 'Twenty years ago'].map(label => ({ id: uid(), label })),
+  };
+  const W = o => { const b = makeBeat(o); world.beats.push(b); return b; };
+  const made = W({ title: 'The Harrow Lantern is made', summary: 'A glassmaker hides a map of the city’s old tunnels inside the lens.', plotlineId: world.plotlines[0].id, slotId: world.slots[0].id, offscreen: true });
+  const founded = W({ title: 'The Syndicate is founded', summary: 'Its first rule: never steal what you can insure.', plotlineId: world.plotlines[1].id, slotId: world.slots[1].id, offscreen: true });
+  const fire = W({ title: 'The museum fire', summary: 'Half the collection burns. Someone has to be blamed.', plotlineId: world.plotlines[0].id, slotId: world.slots[2].id, offscreen: true });
+
+  const book1 = makeExampleNovel();
+  book1.title = 'Book 1: The Lantern Heist';
+  book1.links = [world.id];
+  const b1 = t => book1.beats.find(b => b.title.startsWith(t));
+
+  const book2 = {
+    id: uid(), title: 'Book 2: The Second Lantern', chapters: [], beats: [], manuscriptOrder: [], links: [world.id, book1.id],
+    plotlines: [
+      { id: uid(), name: 'The Tunnels', color: '#3fb6b2', description: 'What the real Lantern was hiding.', archived: false, collapsed: false },
+      { id: uid(), name: 'Hale’s Reckoning', color: '#d9534f', description: 'The inquiry into the night of two thefts.', archived: false, collapsed: false },
+    ],
+    povs: [{ id: uid(), name: 'Mara', color: '#3fb6b2' }, { id: uid(), name: 'Hale', color: '#e0a030' }],
+    slots: ['A year later', 'Below the city', 'The inquiry'].map(label => ({ id: uid(), label })),
+  };
+  book2.chapters = ['1. Glass and Dust', '2. Under the Museum', '3. Testimony'].map(title => ({ id: uid(), title }));
+  const B2 = o => { const b = makeBeat(o); book2.beats.push(b); return b; };
+  const map = B2({ title: 'Mara finds the map in the real Lantern', summary: 'The lens holds lines that match no street she knows.', plotlineId: book2.plotlines[0].id, povId: book2.povs[0].id, slotId: book2.slots[0].id, chapterId: book2.chapters[0].id });
+  const tunnels = B2({ title: 'The tunnels under the museum', summary: 'The map leads straight back to where it all started.', plotlineId: book2.plotlines[0].id, povId: book2.povs[0].id, slotId: book2.slots[1].id, chapterId: book2.chapters[1].id });
+  const inquiry = B2({ title: 'Hale is called before an inquiry', summary: 'Two thefts on one night, on his watch.', plotlineId: book2.plotlines[1].id, povId: book2.povs[1].id, slotId: book2.slots[2].id, chapterId: book2.chapters[2].id });
+  map.influences.push({ to: tunnels.id, note: 'The map is a route' });
+
+  // Worldbuilding → Book 1 and Book 2
+  made.influences.push({ to: b1('Quill forges').id, novel: book1.id, note: 'The hidden map is the one detail Quill can’t copy' });
+  made.influences.push({ to: map.id, novel: book2.id, note: 'The map is still in the lens' });
+  founded.influences.push({ to: b1('Syndicate buys').id, novel: book1.id, note: 'Never steal what you can insure' });
+  fire.influences.push({ to: b1('Mara’s mentor').id, novel: book1.id, note: 'Her mentor is blamed for the fire' });
+  fire.influences.push({ to: tunnels.id, novel: book2.id, note: 'The fire was set to hide the tunnel entrance' });
+  // Book 1 → Book 2
+  b1('The Lantern in the vault').influences.push({ to: inquiry.id, novel: book2.id, note: 'How did two thefts happen on his watch?' });
+  b1('The Syndicate’s buyer').influences.push({ to: map.id, novel: book2.id, note: 'The buyer still wants the real Lantern' });
+  return [world, book1, book2];
 }
 
 /* ------------------------------------------------------------ novel model */
@@ -317,6 +369,56 @@ const NV = {
   },
 };
 
+/* ------------------------------------------------- links between novels */
+
+/**
+ * A novel can "draw on" other novels (n.links): a worldbuilding history, earlier books in a series.
+ * An influence that crosses novels is stored on the cause, with `novel` set to the id of the novel the effect is in.
+ */
+const XN = {
+  novel: (novels, id) => novels.find(x => x.id === id) || null,
+  targetNovelId: (src, inf) => inf.novel || src.id,
+  incoming(novels, n, beatId) {
+    const out = [];
+    for (const nv of novels) for (const b of nv.beats) for (const inf of b.influences) {
+      if (inf.to === beatId && XN.targetNovelId(nv, inf) === n.id) out.push({ from: b, fromNovel: nv, note: inf.note });
+    }
+    return out;
+  },
+  outgoing(novels, n, b) {
+    return b.influences.map(inf => {
+      const tn = XN.novel(novels, XN.targetNovelId(n, inf));
+      const t = tn && NV.beat(tn, inf.to);
+      return t ? { to: t, toNovel: tn, note: inf.note } : null;
+    }).filter(Boolean);
+  },
+  upstream: (novels, n) => (n.links || []).map(id => XN.novel(novels, id)).filter(x => x && x.id !== n.id),
+  downstream: (novels, n) => novels.filter(x => x.id !== n.id && (x.links || []).includes(n.id)),
+  /** Events in other novels that shape this one, grouped by source novel (linked novels first, in link order). */
+  externals(novels, n) {
+    const order = n.links || [];
+    const groups = [];
+    for (const nv of novels) {
+      if (nv.id === n.id) continue;
+      const beats = nv.beats.filter(b => b.status === 'active' && b.influences.some(i => i.novel === n.id && NV.beat(n, i.to)));
+      if (beats.length || order.includes(nv.id)) groups.push({ novel: nv, beats: beats.sort(NV.chronoCmp(nv)) });
+    }
+    const rank = g => { const i = order.indexOf(g.novel.id); return i < 0 ? 1e3 : i; };
+    return groups.sort((a, b) => rank(a) - rank(b));
+  },
+  purgeBeat(novels, beatId) {
+    for (const nv of novels) for (const b of nv.beats) b.influences = b.influences.filter(i => i.to !== beatId);
+  },
+  purgeNovel(novels, novelId) {
+    for (const nv of novels) {
+      nv.links = (nv.links || []).filter(x => x !== novelId);
+      for (const b of nv.beats) b.influences = b.influences.filter(i => i.novel !== novelId);
+    }
+  },
+  /** "Title" for the home novel, "Novel › Title" for an event in another novel. */
+  name: (home, nv, b) => (nv && home && nv.id !== home.id ? `${nv.title} › ${b.title}` : b.title),
+};
+
 /* ------------------------------------------------------------------ modals */
 
 class TextPromptModal extends Modal {
@@ -439,6 +541,10 @@ class BeatModal extends Modal {
     this.plugin = plugin; this.n = novel; this.beat = beat; this.isNew = isNew;
     this.d = clone(beat);
     this.focused = false;
+    // Influence drafts as "novelId::beatId" keys, both directions, so links can cross novels.
+    const novels = plugin.data.novels;
+    this.d.influences = this.d.influences.map(i => ({ key: `${i.novel || novel.id}::${i.to}`, note: i.note || '' }));
+    this.inc = isNew ? [] : XN.incoming(novels, novel, beat.id).map(x => ({ key: `${x.fromNovel.id}::${x.from.id}`, note: x.note || '' }));
   }
   onOpen() {
     this.modalEl.addClass('pw-modal', 'pw-beat-modal');
@@ -450,19 +556,49 @@ class BeatModal extends Modal {
   }
   onClose() { this.contentEl.empty(); }
 
-  beatOptions(sel, beats) {
-    const n = this.n;
-    const groups = [...n.plotlines.map(p => ({ id: p.id, name: p.name })), { id: null, name: 'No plotline' }];
-    for (const g of groups) {
-      const items = beats.filter(b => (NV.plotline(n, b.plotlineId) ? b.plotlineId : null) === g.id).sort(NV.chronoCmp(n));
-      if (!items.length) continue;
-      const og = sel.createEl('optgroup');
-      og.label = g.name;
-      for (const b of items) {
-        const flags = [b.offscreen ? 'off-screen' : '', b.status === 'parked' ? 'later' : '', b.status === 'archived' ? 'archived' : ''].filter(Boolean);
-        og.createEl('option', { value: b.id, text: b.title + (flags.length ? ` (${flags.join(', ')})` : '') });
+  /** Options for every event in the given novels (this one first), grouped by novel and plotline. */
+  beatOptions(sel, novels) {
+    for (const nv of novels) {
+      const home = nv.id === this.n.id;
+      const groups = [...nv.plotlines.map(p => ({ id: p.id, name: p.name })), { id: null, name: 'No plotline' }];
+      for (const g of groups) {
+        const items = nv.beats.filter(b => b.id !== this.d.id && (NV.plotline(nv, b.plotlineId) ? b.plotlineId : null) === g.id).sort(NV.chronoCmp(nv));
+        if (!items.length) continue;
+        const og = sel.createEl('optgroup');
+        og.label = home ? g.name : `${nv.title} › ${g.name}`;
+        for (const b of items) {
+          const flags = [b.offscreen ? 'off-screen' : '', b.status === 'parked' ? 'later' : '', b.status === 'archived' ? 'archived' : ''].filter(Boolean);
+          og.createEl('option', { value: `${nv.id}::${b.id}`, text: b.title + (flags.length ? ` (${flags.join(', ')})` : '') });
+        }
       }
     }
+  }
+
+  influenceList(c, heading, arrow, rows, novels, hint) {
+    const block = c.createDiv('pw-inf-block');
+    const head = block.createDiv('pw-inf-head');
+    head.createSpan({ cls: 'pw-field-label', text: heading });
+    if (novels.length > 1) head.createSpan({ cls: 'pw-muted', text: `  incl. ${novels.slice(1).map(x => x.title).join(', ')}` });
+    const list = block.createDiv('pw-inf-list');
+    rows.forEach((r, idx) => {
+      const row = list.createDiv('pw-inf-row');
+      row.createSpan({ cls: 'pw-inf-arrow', text: arrow });
+      const sel = row.createEl('select', { cls: 'dropdown' });
+      sel.createEl('option', { value: '', text: 'Choose an event…' });
+      this.beatOptions(sel, novels);
+      sel.value = r.key || '';
+      sel.onchange = () => { r.key = sel.value; };
+      const note = row.createEl('input', { type: 'text' });
+      note.placeholder = 'How? (optional)';
+      note.value = r.note || '';
+      note.oninput = () => { r.note = note.value; };
+      const rm = row.createDiv('pw-icon-btn');
+      setIcon(rm, 'x');
+      rm.setAttr('aria-label', 'Remove');
+      rm.onclick = () => { rows.splice(idx, 1); this.draw(); };
+    });
+    const add = block.createEl('button', { text: `＋ ${hint}`, cls: 'pw-small-btn' });
+    add.onclick = () => { rows.push({ key: '', note: '' }); this.draw(); };
   }
 
   draw() {
@@ -543,37 +679,13 @@ class BeatModal extends Modal {
       .setValue(d.status).onChange(v => { d.status = v; }));
 
     c.createEl('h4', { text: 'Influences', cls: 'pw-h' });
-    c.createDiv({ cls: 'pw-muted', text: 'Cause and effect across plotlines, e.g. an off-screen event in one thread that changes things in another.' });
-    const others = n.beats.filter(b => b.id !== d.id);
-    const list = c.createDiv('pw-inf-list');
-    d.influences.forEach((inf, idx) => {
-      const row = list.createDiv('pw-inf-row');
-      row.createSpan({ cls: 'pw-inf-arrow', text: 'leads to →' });
-      const sel = row.createEl('select', { cls: 'dropdown' });
-      sel.createEl('option', { value: '', text: 'Choose an event…' });
-      this.beatOptions(sel, others);
-      sel.value = inf.to || '';
-      sel.onchange = () => { inf.to = sel.value; };
-      const note = row.createEl('input', { type: 'text' });
-      note.placeholder = 'How? (optional)';
-      note.value = inf.note || '';
-      note.oninput = () => { inf.note = note.value; };
-      const rm = row.createDiv('pw-icon-btn');
-      setIcon(rm, 'x');
-      rm.setAttr('aria-label', 'Remove');
-      rm.onclick = () => { d.influences.splice(idx, 1); this.draw(); };
-    });
-    const addInf = c.createEl('button', { text: '＋ Add influence', cls: 'pw-small-btn' });
-    addInf.disabled = !others.length;
-    addInf.onclick = () => { d.influences.push({ to: '', note: '' }); this.draw(); };
-
-    const inc = NV.influencedBy(n, d.id);
-    if (inc.length) {
-      const box = c.createDiv('pw-inc');
-      box.createDiv({ cls: 'pw-field-label', text: 'Shaped by' });
-      for (const x of inc) {
-        box.createDiv({ cls: 'pw-muted', text: `← ${x.from.title}${x.from.offscreen ? ' (off-screen)' : ''}${x.note ? ` — ${x.note}` : ''}` });
-      }
+    const novels = this.plugin.data.novels;
+    const up = XN.upstream(novels, n), down = XN.downstream(novels, n);
+    c.createDiv({ cls: 'pw-muted', text: 'Cause and effect between events: across plotlines, and across linked novels (a worldbuilding history, an earlier book).' });
+    this.influenceList(c, 'Shaped by', '← from', this.inc, [n, ...up], 'Add a cause');
+    this.influenceList(c, 'Leads to', 'leads to →', d.influences, [n, ...down], 'Add an effect');
+    if (novels.length > 1 && !up.length && !down.length) {
+      c.createDiv({ cls: 'pw-muted pw-inf-tip', text: 'Tip: link novels in Manage → Novel → Linked novels to connect events across books.' });
     }
 
     if (!this.isNew) {
@@ -600,8 +712,15 @@ class BeatModal extends Modal {
   save() {
     const d = this.d, n = this.n, b = this.beat;
     d.title = (d.title || '').trim() || 'Untitled';
+    const novels = this.plugin.data.novels;
+    const parse = k => { const [nid, bid] = String(k || '').split('::'); return { nid, bid }; };
     const seen = new Set();
-    d.influences = d.influences.filter(i => i.to && i.to !== d.id && !seen.has(i.to) && seen.add(i.to));
+    d.influences = d.influences.filter(i => i.key && !seen.has(i.key) && seen.add(i.key)).map(i => {
+      const { nid, bid } = parse(i.key);
+      const o = { to: bid, note: i.note || '' };
+      if (nid !== n.id) o.novel = nid;
+      return o;
+    }).filter(o => o.to && o.to !== d.id);
     const moved = this.isNew || d.slotId !== b.slotId || d.plotlineId !== b.plotlineId;
     if (moved && d.slotId && d.plotlineId) d.order = NV.nextOrder(n, d.slotId, d.plotlineId);
     if (this.isNew || d.status !== b.status || (moved && !d.slotId)) d.shelfOrder = Date.now();
@@ -609,6 +728,21 @@ class BeatModal extends Modal {
     Object.assign(b, d);
     if (this.isNew) n.beats.push(b);
     if (chapterChanged) n.manuscriptOrder = n.manuscriptOrder.filter(x => x !== b.id); // re-slot by story time within its new chapter
+    // "Shaped by" links live on their causes (which may be in other novels): rewrite them.
+    for (const nv of novels) for (const src of nv.beats) {
+      if (src.id !== b.id) src.influences = src.influences.filter(i => !(i.to === b.id && XN.targetNovelId(nv, i) === n.id));
+    }
+    const seenIn = new Set();
+    for (const r of this.inc) {
+      if (!r.key || seenIn.has(r.key)) continue;
+      seenIn.add(r.key);
+      const { nid, bid } = parse(r.key);
+      const nv = XN.novel(novels, nid), src = nv && NV.beat(nv, bid);
+      if (!src || src.id === b.id) continue;
+      const o = { to: b.id, note: r.note || '' };
+      if (nv.id !== n.id) o.novel = n.id;
+      src.influences.push(o);
+    }
     this.isNew = false;
     this.plugin.commit();
     this.close();
@@ -652,8 +786,30 @@ class ManageModal extends Modal {
       .addButton(b => b.setButtonText('New novel').onClick(() => {
         new TextPromptModal(this.app, 'New novel', 'Title', '', title => { this.plugin.addNovel(makeNovel(title)); this.draw(); }).open();
       }));
-    new Setting(c).setName('Example novel').setDesc('Add a small example story that shows off-screen events, influences, chapters, flashbacks and multiple POVs.')
-      .addButton(b => b.setButtonText('Add example').onClick(() => { this.plugin.addNovel(makeExampleNovel()); this.draw(); }));
+    new Setting(c).setName('Example series').setDesc('Add a small linked example: a worldbuilding history, Book 1 and Book 2, with off-screen events, influences across books, chapters and multiple POVs.')
+      .addButton(b => b.setButtonText('Add example').onClick(() => { this.plugin.addSeries(makeExampleSeries()); this.draw(); }));
+
+    const novels = this.plugin.data.novels;
+    const others = novels.filter(x => x.id !== n.id);
+    c.createEl('h4', { text: 'Linked novels', cls: 'pw-h' });
+    if (!others.length) {
+      c.createDiv({ cls: 'pw-muted', text: 'Create another novel (for example a worldbuilding history, or the previous book in a series) to link it here.' });
+    } else {
+      c.createDiv({ cls: 'pw-muted', text: `Choose the novels “${n.title}” draws on. Their events can then shape events here: pick them under “Shaped by” in an event’s edit dialog. They appear in a “From linked novels” column on the board.` });
+      for (const o of others) {
+        const on = (n.links || []).includes(o.id);
+        const reverse = (o.links || []).includes(n.id);
+        new Setting(c).setName(o.title)
+          .setDesc(reverse ? `Already draws on “${n.title}”.` : (on ? 'Draws on this novel.' : ''))
+          .addToggle(t => t.setValue(on).onChange(v => {
+            n.links = (n.links || []).filter(x => x !== o.id);
+            if (v) n.links.push(o.id);
+            this.hard();
+          }));
+      }
+      const down = XN.downstream(novels, n);
+      if (down.length) c.createDiv({ cls: 'pw-muted', text: `Shapes: ${down.map(x => x.title).join(', ')}` });
+    }
     new Setting(c).setName('Delete this novel').setDesc('Permanently removes this novel’s outline. Linked notes in your vault are kept.')
       .addButton(b => b.setButtonText('Delete novel').setWarning().onClick(() => {
         new ConfirmModal(this.app, 'Delete novel?', `Delete “${n.title}” and its whole outline? This can’t be undone.`, 'Delete novel', () => {
@@ -776,6 +932,16 @@ class PlotWeaverView extends ItemView {
   get ui() { return this.plugin.data.ui; }
   get novel() { return this.plugin.activeNovel(); }
   get byChapter() { return this.ui.columns === 'chapters'; }
+  get novels() { return this.plugin.data.novels; }
+  /** The novel an event belongs to: this one, or a linked novel shown in the "From linked novels" column. */
+  homeOf(b) { return (this.extHome && this.extHome.get(b.id)) || this.novel; }
+  findBeat(id) {
+    const n = this.novel;
+    const b = NV.beat(n, id);
+    if (b) return { b, home: n };
+    const home = this.extHome && this.extHome.get(id);
+    return home ? { b: NV.beat(home, id), home } : null;
+  }
 
   async onOpen() {
     this.contentEl.addClass('pw-root');
@@ -881,6 +1047,15 @@ class PlotWeaverView extends ItemView {
         this.plugin.commit();
       }
     };
+    if (this.novels.length > 1) {
+      const up = XN.upstream(this.novels, n);
+      const chip = g1.createDiv('pw-links-chip');
+      setIcon(chip.createSpan('pw-btn-icon'), 'link');
+      chip.createSpan({ cls: 'pw-links-text', text: up.length ? `Draws on ${up.map(x => x.title).join(', ')}` : 'Link novels…' });
+      chip.setAttr('aria-label', up.length ? 'Linked novels whose events shape this one (click to change)' : 'Let this novel draw on others: a worldbuilding history, an earlier book');
+      chip.toggleClass('is-empty', !up.length);
+      chip.onclick = () => new ManageModal(this.plugin, 'novel').open();
+    }
     const seg = g1.createDiv('pw-seg');
     this.tbButton(seg, 'layout-grid', 'Board', () => this.setUi({ mode: 'board' }), this.ui.mode !== 'outline', 'Board: plotlines × story time or chapters');
     this.tbButton(seg, 'list-ordered', 'Outline', () => this.setUi({ mode: 'outline' }), this.ui.mode === 'outline', 'Manuscript order, grouped by chapter');
@@ -947,13 +1122,35 @@ class PlotWeaverView extends ItemView {
       }
     }
 
+    // Events in linked novels that shape this one sit in a lead column, level with the plotline they affect.
+    const ext = XN.externals(this.novels, n);
+    this.extHome = new Map();
+    const extByLane = new Map(lanes.map(p => [p.id, []]));
+    const cmp = NV.chronoCmp(n);
+    for (const g of ext) {
+      for (const b of g.beats) {
+        this.extHome.set(b.id, g.novel);
+        const targets = b.influences.filter(i => i.novel === n.id).map(i => NV.beat(n, i.to))
+          .filter(t => t && extByLane.has(t.plotlineId) && NV.onBoard(n, t)).sort(cmp);
+        const laneId = targets.length ? targets[0].plotlineId : (lanes[0] && lanes[0].id);
+        if (laneId) extByLane.get(laneId).push({ b, nv: g.novel });
+      }
+    }
+    const lead = [...extByLane.values()].some(list => list.length);
+
     const grid = scroller.createDiv('pw-grid');
     this.gridEl = grid;
-    grid.style.gridTemplateColumns = `var(--pw-lane-w) repeat(${cols.length}, var(--pw-col-w)) 56px`;
+    grid.style.gridTemplateColumns = `var(--pw-lane-w) ${lead ? 'var(--pw-col-w) ' : ''}repeat(${cols.length}, var(--pw-col-w)) 56px`;
 
     const corner = grid.createDiv('pw-corner');
     corner.createDiv({ cls: 'pw-corner-x', text: byChapter ? 'Chapters →' : 'Story time →' });
     corner.createDiv({ cls: 'pw-corner-y', text: 'Plotlines ↓' });
+    if (lead) {
+      const lh = grid.createDiv('pw-slot-header pw-lead-header');
+      setIcon(lh.createSpan('pw-btn-icon'), 'link');
+      lh.createSpan({ cls: 'pw-slot-label', text: 'From linked novels' });
+      lh.setAttr('aria-label', 'Events in linked novels (worldbuilding, earlier books) that shape this one');
+    }
     for (const col of cols) this.renderColHeader(grid, n, col, byChapter);
     const addCol = grid.createDiv('pw-add-col');
     setIcon(addCol, 'plus');
@@ -962,6 +1159,7 @@ class PlotWeaverView extends ItemView {
 
     for (const p of lanes) {
       this.renderLaneHeader(grid, n, p);
+      if (lead) this.renderLeadCell(grid, p, extByLane.get(p.id));
       for (const col of cols) this.renderCell(grid, n, p, col, byChapter);
       grid.createDiv('pw-cell-filler');
     }
@@ -971,13 +1169,17 @@ class PlotWeaverView extends ItemView {
     ab.onclick = () => this.plugin.addPlotline(n);
     const hidden = n.plotlines.length - lanes.length;
     if (hidden) addLane.createSpan({ cls: 'pw-muted', text: `  ${plural(hidden, 'archived plotline')} hidden (Manage → Plotlines)` });
+    const quiet = ext.filter(g => !g.beats.length);
+    if (quiet.length) {
+      addLane.createSpan({ cls: 'pw-muted', text: `  · Draws on ${quiet.map(g => `“${g.novel.title}”`).join(', ')}: no events link here yet (add one under “Shaped by” in an event’s edit dialog).` });
+    }
     if (byChapter) {
       const off = n.beats.filter(b => NV.onBoard(n, b) && b.offscreen).length;
       if (off) addLane.createSpan({ cls: 'pw-muted', text: `  · ${plural(off, 'off-screen event')} not shown — they aren’t part of chapters (see Story time or Outline)` });
       if (!n.chapters.length) addLane.createSpan({ cls: 'pw-muted', text: '  · No chapters yet: add one with ＋ at the top right.' });
     }
 
-    if (this.ui.showArrows && n.beats.some(b => b.influences.length)) {
+    if (this.ui.showArrows && (n.beats.some(b => b.influences.length) || ext.some(g => g.beats.length))) {
       const lg = addLane.createDiv('pw-legend');
       const item = (cls, text) => { const it = lg.createSpan('pw-legend-item'); it.createSpan(cls); it.createSpan({ text }); };
       item('pw-lg-solid', 'cause → effect');
@@ -987,6 +1189,29 @@ class PlotWeaverView extends ItemView {
 
     this.svgEl = svg('svg', { class: 'pw-svg' });
     grid.appendChild(this.svgEl);
+  }
+
+  renderLeadCell(grid, p, items) {
+    const cell = grid.createDiv('pw-cell pw-lead-cell');
+    if (!items.length) { cell.addClass('pw-lead-empty'); return; }
+    if (p.collapsed) {
+      cell.addClass('pw-collapsed');
+      const chip = cell.createDiv({ cls: 'pw-collapsed-count', text: plural(items.length, 'linked event') });
+      chip.setAttr('aria-label', items.map(x => `${x.nv.title} › ${x.b.title}`).join('\n'));
+      items.forEach(x => this.cardEls.set(x.b.id, chip));
+      return;
+    }
+    for (const x of items) this.renderCard(cell, x.nv, x.b, 'external');
+  }
+
+  externalMenu(e, nv, b) {
+    const m = new Menu();
+    m.addItem(it => it.setTitle(`Edit (in “${nv.title}”)…`).setIcon('pencil').onClick(() => new BeatModal(this.plugin, nv, b, false).open()));
+    if (b.notePath) m.addItem(it => it.setTitle('Open linked note').setIcon('file-text').onClick(() => this.plugin.openNote(nv, b)));
+    m.addItem(it => it.setTitle(`Go to “${nv.title}”`).setIcon('arrow-right').onClick(() => this.plugin.openNovel(nv.id)));
+    m.addSeparator();
+    m.addItem(it => it.setTitle('Linked novels…').setIcon('link').onClick(() => new ManageModal(this.plugin, 'novel').open()));
+    m.showAtMouseEvent(e);
   }
 
   renderColHeader(grid, n, col, byChapter) {
@@ -1129,8 +1354,10 @@ class PlotWeaverView extends ItemView {
     const card = parent.createDiv('pw-card');
     card.dataset.id = b.id;
     card.style.setProperty('--pw-color', p ? p.color : 'var(--text-faint)');
+    const external = where === 'external';
     if (b.offscreen) card.addClass('pw-offscreen');
-    if (!this.matchesPov(b)) card.addClass('pw-dim');
+    if (external) card.addClass('pw-external');
+    else if (!this.matchesPov(b)) card.addClass('pw-dim');
 
     const top = card.createDiv('pw-card-top');
     if (pov) {
@@ -1144,7 +1371,7 @@ class PlotWeaverView extends ItemView {
     }
     top.createDiv('pw-spacer');
     const outN = b.influences.length;
-    const inN = NV.influencedBy(n, b.id).length;
+    const inN = XN.incoming(this.novels, n, b.id).length;
     if (outN || inN) {
       const t = top.createSpan({ cls: 'pw-tag pw-tag-inf', text: [inN ? `←${inN}` : '', outN ? `${outN}→` : ''].filter(Boolean).join(' ') });
       t.setAttr('aria-label', `Shaped by ${inN} · leads to ${outN}`);
@@ -1157,13 +1384,17 @@ class PlotWeaverView extends ItemView {
     }
     const more = top.createDiv('pw-icon-btn');
     setIcon(more, 'more-horizontal');
-    more.onclick = e => { e.stopPropagation(); this.cardMenu(e, n, b); };
+    more.onclick = e => { e.stopPropagation(); if (external) this.externalMenu(e, n, b); else this.cardMenu(e, n, b); };
 
     card.createDiv({ cls: 'pw-card-title', text: b.title || 'Untitled' });
     if (b.summary) card.createDiv({ cls: 'pw-card-summary', text: b.summary });
     const slot = NV.slot(n, b.slotId);
     const ch = NV.hasChapter(n, b) ? NV.chapter(n, b.chapterId) : null;
-    if (where === 'shelf') {
+    if (external) {
+      const m = card.createDiv('pw-card-meta');
+      m.createSpan({ cls: 'pw-novel-chip', text: n.title });
+      if (slot) m.createSpan({ cls: 'pw-time-chip', text: slot.label });
+    } else if (where === 'shelf') {
       const was = b.status !== 'active' ? [slot ? `was: ${slot.label}` : '', NV.chapter(n, b.chapterId) ? NV.chapter(n, b.chapterId).title : ''] : [];
       const meta = [p ? p.name : 'No plotline', ...was].filter(Boolean).join(' · ');
       card.createDiv({ cls: 'pw-card-meta', text: meta });
@@ -1177,16 +1408,18 @@ class PlotWeaverView extends ItemView {
       card.createDiv({ cls: 'pw-card-meta pw-faint', text: 'no chapter yet' });
     }
 
-    card.draggable = true;
+    card.draggable = !external;
+    if (external) card.setAttr('aria-label', `From “${n.title}”: double-click to edit it there`);
     card.addEventListener('dragstart', e => {
       e.stopPropagation();
+      if (external) { e.preventDefault(); return; }
       this.drag = { kind: 'beat', id: b.id, source: where === 'shelf' ? 'shelf' : 'board' };
       if (e.dataTransfer) { e.dataTransfer.setData('text/plain', b.title); e.dataTransfer.effectAllowed = 'move'; }
       setTimeout(() => card.addClass('pw-dragging'), 0);
     });
     card.addEventListener('dragend', () => this.endDrag());
-    card.addEventListener('dblclick', e => { e.stopPropagation(); this.editBeat(b); });
-    card.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); this.cardMenu(e, n, b); });
+    card.addEventListener('dblclick', e => { e.stopPropagation(); if (external) new BeatModal(this.plugin, n, b, false).open(); else this.editBeat(b); });
+    card.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); if (external) this.externalMenu(e, n, b); else this.cardMenu(e, n, b); });
     if (where !== 'shelf') {
       card.addEventListener('mouseenter', () => this.highlight(b.id));
       card.addEventListener('mouseleave', () => this.highlight(null));
@@ -1357,7 +1590,7 @@ class PlotWeaverView extends ItemView {
     if (kind === 'archived' && items.length) {
       const emp = shelf.createEl('button', { cls: 'pw-small-btn pw-empty-archive', text: 'Empty archive…' });
       emp.onclick = () => new ConfirmModal(this.app, 'Empty archive?', `Permanently delete ${plural(items.length, 'archived idea')}?`, 'Delete all', () => {
-        items.forEach(b => NV.remove(n, b.id)); this.plugin.commit();
+        items.forEach(b => { NV.remove(n, b.id); XN.purgeBeat(this.plugin.data.novels, b.id); }); this.plugin.commit();
       }).open();
     }
 
@@ -1374,6 +1607,12 @@ class PlotWeaverView extends ItemView {
     this.outlineScroller = scroller;
     const head = scroller.createDiv('pw-outline-head');
     head.createEl('h3', { text: 'Manuscript order' });
+    const up = XN.upstream(this.novels, n), down = XN.downstream(this.novels, n);
+    if (up.length || down.length) {
+      const links = head.createDiv('pw-outline-links');
+      if (up.length) links.createSpan({ text: `Draws on: ${up.map(x => x.title).join(', ')}` });
+      if (down.length) links.createSpan({ text: `Shapes: ${down.map(x => x.title).join(', ')}` });
+    }
     head.createDiv({ cls: 'pw-muted', text: 'The order readers meet your scenes, chapter by chapter. Drag scenes to rearrange them or move them between chapters; drag a chapter heading to reorder chapters. Off-screen events are woven in automatically at their point in story time.' });
     const actions = head.createDiv('pw-outline-actions');
     this.tbButton(actions, 'book-open', 'Add chapter', () => this.plugin.addChapter(n, n.chapters.length));
@@ -1489,19 +1728,20 @@ class PlotWeaverView extends ItemView {
 
   /** Influence links with their "how" notes, both directions, as readable lines. */
   renderInfluences(body, n, b) {
-    const inc = NV.influencedBy(n, b.id);
-    const out = b.influences.map(i => ({ other: NV.beat(n, i.to), note: i.note })).filter(x => x.other);
+    const inc = XN.incoming(this.novels, n, b.id);
+    const out = XN.outgoing(this.novels, n, b);
     if (!inc.length && !out.length) return;
     const box = body.createDiv('pw-oinf');
-    const line = (dir, other, note) => {
+    const line = (dir, other, nv, note) => {
       const row = box.createDiv('pw-oinf-line');
       row.createSpan({ cls: 'pw-oinf-dir', text: dir });
+      if (nv.id !== n.id) row.createSpan({ cls: 'pw-novel-chip', text: nv.title });
       const t = row.createSpan({ cls: 'pw-oinf-item' + (other.offscreen ? ' is-off' : ''), text: other.title + (other.offscreen ? ' (off-screen)' : '') });
-      t.style.setProperty('--pw-color', (NV.plotline(n, other.plotlineId) || {}).color || 'var(--text-faint)');
+      t.style.setProperty('--pw-color', (NV.plotline(nv, other.plotlineId) || {}).color || 'var(--text-faint)');
       if (note) row.createSpan({ cls: 'pw-oinf-note', text: ` — ${note}` });
     };
-    for (const x of inc) line('← Shaped by', x.from, x.note);
-    for (const x of out) line('→ Leads to', x.other, x.note);
+    for (const x of inc) line('← Shaped by', x.from, x.fromNovel, x.note);
+    for (const x of out) line('→ Leads to', x.to, x.toNovel, x.note);
   }
 
   renderOffscreenRow(list, n, b) {
@@ -1608,10 +1848,11 @@ class PlotWeaverView extends ItemView {
     for (const el of this.cardEls.values()) el.removeClass('pw-related', 'pw-focus');
     if (this.svgEl) this.svgEl.querySelectorAll('.pw-arrow').forEach(p => p.classList.remove('pw-hot'));
     if (!id) return;
-    const b = NV.beat(n, id);
-    if (!b) return;
+    const found = this.findBeat(id);
+    if (!found) return;
+    const b = found.b;
     const rel = new Set(b.influences.map(i => i.to));
-    NV.influencedBy(n, id).forEach(x => rel.add(x.from.id));
+    XN.incoming(this.novels, found.home, id).forEach(x => rel.add(x.from.id));
     const self = this.cardEls.get(id);
     if (self) self.addClass('pw-focus');
     rel.forEach(r => { const el = this.cardEls.get(r); if (el) el.addClass('pw-related'); });
@@ -1650,10 +1891,11 @@ class PlotWeaverView extends ItemView {
     const HEAD_L = 9, HEAD_W = 9;
     const f = v => v.toFixed(1);
     const add = (p, v, k) => ({ x: p.x + v.x * k, y: p.y + v.y * k });
-    for (const b of n.beats) {
+    const sources = n.beats.concat(...[...(this.extHome || new Map()).keys()].map(id => { const f = this.findBeat(id); return f ? [f.b] : []; }));
+    for (const b of sources) {
       const fromEl = this.cardEls.get(b.id);
       if (!fromEl) continue;
-      const pl = NV.plotline(n, b.plotlineId);
+      const pl = NV.plotline(this.homeOf(b), b.plotlineId);
       const color = pl ? pl.color : '#888888';
       for (const inf of b.influences) {
         const toEl = this.cardEls.get(inf.to);
@@ -1672,7 +1914,7 @@ class PlotWeaverView extends ItemView {
         const wing = add(p3, u, -HEAD_L - 1.5), notch = add(p3, u, -HEAD_L + 2.5);
         const head = `M${f(p3.x)},${f(p3.y)} L${f(wing.x + nx)},${f(wing.y + ny)} L${f(notch.x)},${f(notch.y)} L${f(wing.x - nx)},${f(wing.y - ny)} Z`;
 
-        const g = svg('g', { class: 'pw-arrow' + (b.offscreen ? ' pw-arrow-off' : ''), 'data-from': b.id, 'data-to': inf.to });
+        const g = svg('g', { class: 'pw-arrow' + (b.offscreen ? ' pw-arrow-off' : '') + (this.extHome && this.extHome.has(b.id) ? ' pw-arrow-ext' : ''), 'data-from': b.id, 'data-to': inf.to });
         g.appendChild(svg('path', { d, class: 'pw-arrow-halo' }));
         g.appendChild(svg('path', { d, class: 'pw-arrow-line', stroke: color }));
         g.appendChild(svg('circle', { cx: f(p0.x), cy: f(p0.y), r: '3.2', class: 'pw-arrow-origin', fill: color }));
@@ -1753,7 +1995,7 @@ class PlotWeaverPlugin extends Plugin {
     });
     this.addCommand({ id: 'export-outline', name: 'Export outline to note', callback: () => this.exportOutline(this.activeNovel()) });
     this.addCommand({ id: 'manage', name: 'Manage plotlines, POVs, story time and chapters', callback: () => new ManageModal(this).open() });
-    this.addCommand({ id: 'add-example', name: 'Add example novel', callback: () => { this.addNovel(makeExampleNovel()); this.activateView(); } });
+    this.addCommand({ id: 'add-example', name: 'Add example series (linked novels)', callback: () => { this.addSeries(makeExampleSeries()); this.activateView(); } });
     this.addSettingTab(new PlotWeaverSettingTab(this.app, this));
 
     this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
@@ -1783,9 +2025,17 @@ class PlotWeaverPlugin extends Plugin {
       ui: Object.assign({}, DEFAULT_UI, d.ui, d.ui && d.ui.showShelf === false && d.ui.shelfCollapsed === undefined ? { shelfCollapsed: true } : {}),
     };
     if (!this.data.novels.length) {
-      const ex = makeExampleNovel();
-      this.data.novels.push(ex);
-      this.data.activeNovelId = ex.id;
+      const series = makeExampleSeries();
+      this.data.novels.push(...series);
+      this.data.activeNovelId = series[1].id;
+    }
+    // Drop links to novels or events that no longer exist.
+    const novels = this.data.novels;
+    for (const nv of novels) {
+      nv.links = nv.links.filter(id => XN.novel(novels, id));
+      for (const b of nv.beats) {
+        b.influences = b.influences.filter(i => { const tn = XN.novel(novels, XN.targetNovelId(nv, i)); return tn && NV.beat(tn, i.to); });
+      }
     }
   }
 
@@ -1838,8 +2088,18 @@ class PlotWeaverPlugin extends Plugin {
     this.data.activeNovelId = novel.id;
     this.commit();
   }
+  addSeries(list) {
+    this.data.novels.push(...list);
+    this.data.activeNovelId = (list[1] || list[0]).id;
+    this.commit();
+  }
+  openNovel(id) {
+    this.data.activeNovelId = id;
+    this.commit();
+  }
   deleteNovel(id) {
     this.data.novels = this.data.novels.filter(n => n.id !== id);
+    XN.purgeNovel(this.data.novels, id);
     if (!this.data.novels.length) this.data.novels.push(makeNovel('My Novel'));
     this.data.activeNovelId = this.data.novels[0].id;
     this.commit();
@@ -1905,7 +2165,7 @@ class PlotWeaverPlugin extends Plugin {
     new ConfirmModal(this.app, 'Delete chapter?', `Delete “${ch.title}”? Its ${plural(count, 'scene')} stay on the board in story time, just without a chapter.`, 'Delete chapter', go).open();
   }
   deleteBeat(n, b) {
-    const go = () => { NV.remove(n, b.id); this.commit(); new Notice(`Deleted “${b.title}”`); };
+    const go = () => { NV.remove(n, b.id); XN.purgeBeat(this.data.novels, b.id); this.commit(); new Notice(`Deleted “${b.title}”`); };
     if (!this.data.settings.confirmDelete) { go(); return; }
     new ConfirmModal(this.app, 'Delete permanently?', `Delete “${b.title}”? This can’t be undone. (Archive it instead to keep it out of the way.)`, 'Delete', go).open();
   }
@@ -1933,8 +2193,8 @@ class PlotWeaverPlugin extends Plugin {
       offscreen: String(!!b.offscreen), status: b.status, id: b.id,
       date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
       time: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
-      shapedBy: NV.influencedBy(n, b.id).map(x => `- ${ref(x.from)}${x.from.offscreen ? ' (off-screen)' : ''}${x.note ? ` — ${x.note}` : ''}`).join('\n'),
-      leadsTo: b.influences.map(i => { const t = NV.beat(n, i.to); return t ? `- ${ref(t)}${i.note ? ` — ${i.note}` : ''}` : ''; }).filter(Boolean).join('\n'),
+      shapedBy: XN.incoming(this.data.novels, n, b.id).map(x => `- ${x.fromNovel.id !== n.id ? `${x.fromNovel.title} › ` : ''}${ref(x.from)}${x.from.offscreen ? ' (off-screen)' : ''}${x.note ? ` — ${x.note}` : ''}`).join('\n'),
+      leadsTo: XN.outgoing(this.data.novels, n, b).map(x => `- ${x.toNovel.id !== n.id ? `${x.toNovel.title} › ` : ''}${ref(x.to)}${x.note ? ` — ${x.note}` : ''}`).join('\n'),
     };
   }
   noteProps(n, b) {
@@ -2031,7 +2291,24 @@ class PlotWeaverPlugin extends Plugin {
   buildOutlineMarkdown(n) {
     const L = [];
     const one = s => (s || '').replace(/\s*\n\s*/g, ' ');
+    const novels = this.data.novels;
     L.push(`# ${n.title}: Outline`, '', `*Exported from Plot Weaver, ${new Date().toLocaleString()}*`, '');
+    const up = XN.upstream(novels, n), down = XN.downstream(novels, n);
+    if (up.length) L.push(`**Draws on:** ${up.map(x => x.title).join(', ')}  `);
+    if (down.length) L.push(`**Shapes:** ${down.map(x => x.title).join(', ')}`);
+    if (up.length || down.length) L.push('');
+    const ext = XN.externals(novels, n).filter(g => g.beats.length);
+    if (ext.length) {
+      L.push('## From linked novels');
+      for (const g of ext) {
+        L.push('', `### ${g.novel.title}`);
+        for (const b of g.beats) {
+          const t = XN.outgoing(novels, g.novel, b).filter(x => x.toNovel.id === n.id);
+          L.push(`- **${b.title}**${b.offscreen ? ' _(off-screen)_' : ''} → ${t.map(x => x.to.title + (x.note ? ` (${one(x.note)})` : '')).join('; ')}`);
+        }
+      }
+      L.push('');
+    }
     const lanes = n.plotlines.filter(p => !p.archived);
     L.push('## Plotlines');
     for (const p of lanes) L.push(`- **${p.name}**${p.description ? ` — ${one(p.description)}` : ''}`);
@@ -2049,8 +2326,7 @@ class PlotWeaverPlugin extends Plugin {
       for (const b of g.items) {
         const p = NV.plotline(n, b.plotlineId), s = NV.slot(n, b.slotId);
         if (b.offscreen) {
-          const t = b.influences.map(i => ({ t: NV.beat(n, i.to), note: i.note })).filter(x => x.t)
-            .map(x => x.t.title + (x.note ? ` (${one(x.note)})` : ''));
+          const t = XN.outgoing(novels, n, b).map(x => XN.name(n, x.toNovel, x.to) + (x.note ? ` (${one(x.note)})` : ''));
           L.push(`- *Meanwhile, off-screen (${s.label}, ${p.name}):* ${b.title}${t.length ? ` → ${t.join('; ')}` : ''}`);
           continue;
         }
@@ -2058,10 +2334,10 @@ class PlotWeaverPlugin extends Plugin {
         const bits = [p.name, pov ? `POV: ${pov.name}` : null, s ? `When: ${s.label}` : 'When: —'].filter(Boolean);
         L.push(`${nums.get(b.id)}. **${b.title}** — ${bits.join(' · ')}`);
         if (b.summary) L.push(`    ${one(b.summary)}`);
-        const inc = NV.influencedBy(n, b.id);
-        if (inc.length) L.push(`    *Shaped by:* ${inc.map(x => x.from.title + (x.from.offscreen ? ' (off-screen)' : '') + (x.note ? ` — ${one(x.note)}` : '')).join('; ')}`);
-        const outs = b.influences.map(i => ({ t: NV.beat(n, i.to), note: i.note })).filter(x => x.t);
-        if (outs.length) L.push(`    *Leads to:* ${outs.map(x => x.t.title + (x.note ? ` — ${one(x.note)}` : '')).join('; ')}`);
+        const inc = XN.incoming(novels, n, b.id);
+        if (inc.length) L.push(`    *Shaped by:* ${inc.map(x => XN.name(n, x.fromNovel, x.from) + (x.from.offscreen ? ' (off-screen)' : '') + (x.note ? ` — ${one(x.note)}` : '')).join('; ')}`);
+        const outs = XN.outgoing(novels, n, b);
+        if (outs.length) L.push(`    *Leads to:* ${outs.map(x => XN.name(n, x.toNovel, x.to) + (x.note ? ` — ${one(x.note)}` : '')).join('; ')}`);
         if (b.notePath) L.push(`    [[${b.notePath.replace(/\.md$/, '')}|Scene note]]`);
       }
     }
@@ -2071,10 +2347,7 @@ class PlotWeaverPlugin extends Plugin {
       for (const p of lanes) for (const b of NV.cell(n, s.id, p.id)) {
         const ch = NV.hasChapter(n, b) ? ` [${NV.chapter(n, b.chapterId).title}]` : '';
         rows.push(`- *${p.name}:* ${b.title}${b.offscreen ? ' _(off-screen)_' : ch}`);
-        for (const inf of b.influences) {
-          const t = NV.beat(n, inf.to);
-          if (t) rows.push(`    - → ${t.title}${inf.note ? ` (${one(inf.note)})` : ''}`);
-        }
+        for (const x of XN.outgoing(novels, n, b)) rows.push(`    - → ${XN.name(n, x.toNovel, x.to)}${x.note ? ` (${one(x.note)})` : ''}`);
       }
       if (rows.length) L.push('', `### ${i + 1}. ${s.label}`, ...rows);
     });
