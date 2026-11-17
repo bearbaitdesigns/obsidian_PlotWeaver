@@ -1888,6 +1888,18 @@ class PlotWeaverView extends ItemView {
     box.setAttr('aria-label', tip.join(' · '));
   }
 
+  /** Scroll a card into view on the board and flash it (used when arriving from an embed). */
+  focusCard(id) {
+    const go = () => {
+      const el = this.cardEls.get(id);
+      if (!el) return;
+      el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+      el.addClass('pw-flash');
+      setTimeout(() => el.removeClass('pw-flash'), 1800);
+    };
+    requestAnimationFrame(() => requestAnimationFrame(go));
+  }
+
   /* ---------- drag a link from one card to another */
 
   startLink(e, b, card) {
@@ -2646,6 +2658,18 @@ class PlotWeaverPlugin extends Plugin {
         if (view) view.setFullscreen(!view.isFullscreen);
       },
     });
+    // Embeds: ```plot-weaver``` blocks in any note show progress and open the board when clicked.
+    this.embeds = new Set();
+    this.registerMarkdownCodeBlockProcessor('plot-weaver', (source, el, ctx) => {
+      const embed = { el, source, sourcePath: ctx && ctx.sourcePath };
+      this.embeds.add(embed);
+      this.renderEmbed(embed);
+    });
+    this.addCommand({
+      id: 'insert-summary', name: 'Insert progress summary here',
+      editorCallback: editor => editor.replaceSelection(`\`\`\`plot-weaver\nnovel: ${this.activeNovel().title}\n\`\`\`\n`),
+    });
+    this.addCommand({ id: 'create-summary-note', name: 'Create progress summary note', callback: () => this.createSummaryNote(this.activeNovel()) });
     this.addCommand({ id: 'export-outline', name: 'Export outline to note', callback: () => this.exportOutline(this.activeNovel()) });
     this.addCommand({ id: 'manage', name: 'Manage plotlines, POVs and chapters', callback: () => new ManageModal(this).open() });
     this.addCommand({ id: 'add-example', name: 'Add example series (linked novels)', callback: () => { this.addSeries(makeExampleSeries()); this.activateView(); } });
@@ -2711,6 +2735,13 @@ class PlotWeaverPlugin extends Plugin {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
       if (leaf.view instanceof PlotWeaverView) leaf.view.render();
     }
+    this.refreshEmbeds();
+  }
+  refreshEmbeds() {
+    for (const e of [...(this.embeds || [])]) {
+      if (!e.el.isConnected) { this.embeds.delete(e); continue; }
+      this.renderEmbed(e);
+    }
   }
   refreshViewsSoon() {
     clearTimeout(this.refreshTimer);
@@ -2726,6 +2757,15 @@ class PlotWeaverPlugin extends Plugin {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
       if (leaf.view instanceof PlotWeaverView) leaf.view.setFullscreen(false);
     }
+  }
+
+  async openBoard(novelId, beatId) {
+    if (novelId && XN.novel(this.data.novels, novelId)) this.data.activeNovelId = novelId;
+    if (beatId) this.data.ui.mode = 'board';
+    this.commit();
+    await this.activateView();
+    const view = this.boardView();
+    if (view && beatId) view.focusCard(beatId);
   }
 
   async activateView() {
@@ -2876,6 +2916,142 @@ class PlotWeaverPlugin extends Plugin {
     const def = key ? (s.statuses || []).find(d => String(d.match || '').split(',').map(x => x.trim().toLowerCase()).concat([String(d.name || '').toLowerCase()]).includes(key)) : null;
     return { status, def: def || null, words };
   }
+  /** Manuscript scenes, words and status counts for a novel (same rules as the stats strip). */
+  novelStats(n) {
+    const scenes = n.beats.filter(b => NV.onBoard(n, b) && !b.offscreen && !NV.isSummary(n, b) && !NV.isPlanning(n, b));
+    const defs = this.data.settings.statuses || [];
+    const counts = new Map();
+    let withNote = 0;
+    for (const b of scenes) {
+      const m = this.noteMeta(b);
+      if (m) withNote++;
+      const k = !m ? '__nonote' : m.def ? m.def.name : m.status ? '__other' : '__nostatus';
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    const buckets = defs.map(d => ({ key: d.name, label: d.name, icon: d.icon, color: d.color }))
+      .concat([{ key: '__other', label: 'Other status' }, { key: '__nostatus', label: 'No status' }, { key: '__nonote', label: 'No note' }])
+      .map(x => Object.assign(x, { count: counts.get(x.key) || 0 }));
+    const last = defs[defs.length - 1];
+    const done = last ? counts.get(last.name) || 0 : 0;
+    return {
+      scenes, withNote, buckets, words: this.wordsOf(scenes),
+      pct: scenes.length && last ? Math.round((done / scenes.length) * 100) : null, doneLabel: last ? last.name.toLowerCase() : '',
+      chapters: n.chapters.filter(c => NV.kind(c) === 'chapter').length,
+    };
+  }
+
+  /** The card a note is linked to, if any. */
+  beatForNote(path) {
+    if (!path) return null;
+    for (const n of this.data.novels) for (const b of n.beats) if (b.notePath === path) return { n, b };
+    return null;
+  }
+
+  renderEmbed(embed) {
+    const el = embed.el;
+    el.empty();
+    el.addClass('pw-embed');
+    const opts = {};
+    for (const line of String(embed.source || '').split('\n')) {
+      const m = line.match(/^\s*([\w-]+)\s*:\s*(.*?)\s*$/);
+      if (m) opts[m[1].toLowerCase()] = m[2];
+    }
+    const want = (opts.novel || '').trim().toLowerCase();
+    const scene = !want && opts.scene !== 'no' ? this.beatForNote(embed.sourcePath) : null;
+    if (scene) { this.renderSceneEmbed(el, scene.n, scene.b); return; }
+    const n = want ? this.data.novels.find(x => x.title.toLowerCase() === want) || this.data.novels.find(x => x.title.toLowerCase().includes(want)) : this.activeNovel();
+    if (!n) {
+      el.createDiv({ cls: 'pw-embed-missing', text: `Plot Weaver: no novel called “${opts.novel}”.` });
+      return;
+    }
+    this.renderNovelEmbed(el, n);
+  }
+
+  embedHeader(el, title, onOpen) {
+    const head = el.createDiv('pw-embed-head');
+    setIcon(head.createSpan('pw-embed-logo'), 'git-fork');
+    head.createSpan({ cls: 'pw-embed-brand', text: 'Plot Weaver' });
+    head.createSpan({ cls: 'pw-embed-title', text: title });
+    head.createDiv('pw-spacer');
+    head.createSpan({ cls: 'pw-embed-open', text: 'Open board →' });
+    el.setAttr('aria-label', 'Open in Plot Weaver');
+    el.onclick = e => { e.preventDefault(); e.stopPropagation(); onOpen(); };
+  }
+
+  renderNovelEmbed(el, n) {
+    const st = this.novelStats(n);
+    this.embedHeader(el, n.title, () => this.openBoard(n.id));
+    const body = el.createDiv('pw-embed-body');
+    const big = body.createDiv('pw-embed-big');
+    big.createSpan({ cls: 'pw-embed-num', text: st.words !== null ? st.words.toLocaleString() : '—' });
+    big.createSpan({ cls: 'pw-embed-unit', text: 'words' });
+    const side = body.createDiv('pw-embed-side');
+    side.createDiv({ cls: 'pw-embed-sub', text: `${plural(st.scenes.length, 'scene')} · ${plural(st.chapters, 'chapter')}${st.pct !== null ? ` · ${st.pct}% ${st.doneLabel}` : ''}` });
+    const shown = st.buckets.filter(x => x.count);
+    if (shown.length) {
+      const prog = side.createDiv('pw-stat-progress pw-embed-progress');
+      for (const x of shown) {
+        const seg = prog.createDiv('pw-stat-seg');
+        seg.style.flex = String(x.count);
+        seg.style.background = x.key.startsWith('__') ? 'var(--background-modifier-border)' : x.color;
+      }
+    }
+    const list = el.createDiv('pw-embed-statuses');
+    for (const x of shown) {
+      const row = list.createDiv('pw-embed-status');
+      if (!x.key.startsWith('__')) {
+        const ic = row.createSpan('pw-status-icon');
+        ic.style.setProperty('--pw-status', x.color);
+        setIcon(ic, x.icon);
+      } else row.addClass('is-faint');
+      row.createSpan({ cls: 'pw-embed-status-name', text: x.label });
+      row.createSpan({ cls: 'pw-embed-status-n', text: String(x.count) });
+    }
+    if (!st.withNote) el.createDiv({ cls: 'pw-embed-hint', text: 'Link notes to your scenes to track their status and word count.' });
+  }
+
+  renderSceneEmbed(el, n, b) {
+    const meta = this.noteMeta(b);
+    this.embedHeader(el, n.title, () => this.openBoard(n.id, b.id));
+    const body = el.createDiv('pw-embed-body pw-embed-scene');
+    const left = body.createDiv('pw-embed-scene-main');
+    left.createDiv({ cls: 'pw-embed-scene-title', text: b.title });
+    const facts = left.createDiv('pw-embed-facts');
+    const ch = NV.chapter(n, b.chapterId), p = NV.plotline(n, b.plotlineId), pov = NV.pov(n, b.povId);
+    if (ch) facts.createSpan({ text: ch.title });
+    if (p) { const pc = facts.createSpan({ cls: 'pw-plot-chip', text: p.name }); pc.style.setProperty('--pw-color', p.color); }
+    if (pov) { const pb = facts.createSpan({ cls: 'pw-pov', text: pov.name }); pb.style.setProperty('--pw-pov', pov.color); }
+    if (b.offscreen) facts.createSpan({ text: 'off-screen' });
+    const right = body.createDiv('pw-embed-scene-stats');
+    const st = right.createDiv('pw-embed-scene-status');
+    if (meta && meta.def) {
+      const ic = st.createSpan('pw-status-icon');
+      ic.style.setProperty('--pw-status', meta.def.color);
+      setIcon(ic, meta.def.icon);
+      st.createSpan({ text: meta.def.name });
+    } else {
+      st.createSpan({ cls: 'pw-embed-faint', text: meta && meta.status ? meta.status : 'No status' });
+    }
+    const w = right.createDiv('pw-embed-big');
+    w.createSpan({ cls: 'pw-embed-num', text: meta && meta.words !== null ? meta.words.toLocaleString() : '—' });
+    w.createSpan({ cls: 'pw-embed-unit', text: 'words' });
+  }
+
+  async createSummaryNote(n) {
+    try {
+      const folder = this.novelFolder(n);
+      await this.ensureFolder(folder);
+      const path = normalizePath(`${folder}/${sanitizeFileName(n.title)} - Progress.md`);
+      let file = this.app.vault.getAbstractFileByPath(path);
+      if (!(file instanceof TFile)) file = await this.app.vault.create(path, `# ${n.title}: progress\n\n\`\`\`plot-weaver\nnovel: ${n.title}\n\`\`\`\n`);
+      this.leaveFullscreen();
+      await this.app.workspace.getLeaf('tab').openFile(file);
+    } catch (err) {
+      console.error('Plot Weaver', err);
+      new Notice(`Plot Weaver couldn’t create the note: ${err.message}`);
+    }
+  }
+
   /** Total words across cards (from their notes' word-count property). */
   wordsOf(beats) {
     let total = 0, any = false;

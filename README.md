@@ -33,6 +33,21 @@ BRAT checks this repository’s releases for updates.
 
 Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/bearbaitdesigns/obsidian_PlotWeaver/releases/latest). Put them in `<your vault>/.obsidian/plugins/plot-weaver/`, then enable the plugin.
 
+## Progress embeds
+
+Put a `plot-weaver` code block in any note to show progress there. Click it to open the board.
+
+````
+```plot-weaver
+novel: Book 1: The Lantern Heist
+```
+````
+
+- **With `novel:`**, the block shows that book’s total words, a progress bar by status, how many scenes are at each status, and the scene and chapter counts. Clicking it opens the board on that book. Leave `novel:` out to use the book that’s open on the board.
+- **In a scene note** (a note linked to a card), a plain ```` ```plot-weaver ```` block shows that scene’s status, word count, chapter, plotline and POV. Clicking it opens the board and scrolls to the scene’s card. Add `scene: no` to show the book summary instead.
+
+Embeds update live. Use **Insert progress summary here** to add one at the cursor, or **Create progress summary note** to make a ready-made dashboard note.
+
 ## Scene note templates
 
 Put templates in your templates folder (default `Templates`; change it in the plugin settings). These variables are filled in when a note is created:
@@ -56,6 +71,7 @@ Anything else, including Templater `<% %>` code, is left untouched. Plot Weaver 
 - **Capture an idea**: adds an idea to the Unplaced shelf from anywhere
 - **Manage plotlines, POVs and chapters**
 - **Export outline to note**
+- **Insert progress summary here** / **Create progress summary note**
 - **Add example series (linked novels)**
 
 ## Notes
