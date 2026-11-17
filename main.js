@@ -1693,22 +1693,13 @@ class PlotWeaverView extends ItemView {
     } else {
     if (b.summary) card.createDiv({ cls: 'pw-card-summary', text: b.summary });
     const slot = NV.timeOf(n, b);
-    const ch = NV.hasChapter(n, b) ? NV.chapter(n, b.chapterId) : null;
     if (NV.isSummary(n, b)) card.addClass('pw-summary-card');
     if (external) {
       const m = card.createDiv('pw-card-meta');
       m.createSpan({ cls: 'pw-novel-chip', text: n.title });
       if (slot) m.createSpan({ cls: 'pw-time-chip', text: slot.label });
     } else if (where === 'shelf') {
-      const was = b.status !== 'active' ? [slot ? `was: ${slot.label}` : '', NV.chapter(n, b.chapterId) ? NV.chapter(n, b.chapterId).title : ''] : [];
-      const meta = [p ? p.name : 'No plotline', ...was].filter(Boolean).join(' · ');
-      card.createDiv({ cls: 'pw-card-meta', text: meta });
-    } else if (ch) {
-      const m = card.createDiv('pw-card-meta');
-      m.createSpan({ cls: 'pw-chapter-chip', text: ch.title }).toggleClass('is-part', NV.kind(ch) === 'part');
-      if (NV.kind(ch) === 'planning') m.addClass('is-planning');
-    } else if (!b.offscreen && n.chapters.length && !NV.isSummary(n, b)) {
-      card.createDiv({ cls: 'pw-card-meta pw-faint', text: 'no chapter yet' });
+      card.createDiv({ cls: 'pw-card-meta', text: p ? p.name : 'No plotline' });
     }
     }
 
