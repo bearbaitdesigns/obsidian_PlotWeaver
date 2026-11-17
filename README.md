@@ -1,18 +1,15 @@
 # Plot Weaver
 
-An Obsidian plugin for outlining a novel with **several plotlines running at once**, **multiple POVs**, **off-screen events**, and the **cause and effect** that ties threads together. Plan loosely in story time, then assign scenes to chapters when you’re ready.
+An Obsidian plugin for outlining a novel with **several plotlines running at once**, **multiple POVs**, **off-screen events**, and the **cause and effect** that ties threads together. Plan loosely in Planning sections, then move scenes into chapters when you’re ready.
 
 ## Features
 
-- **Board.** Plotlines are rows. The columns show either:
-  - **Story time**: general events in the story world, for loose planning (“The wedding”, “Ten years earlier”).
-  - **Chapters**: reading order. Scenes not yet assigned wait in a **No chapter yet** column.
-
-  Drag cards between cells and reorder them within a cell. Drag row and column headers to reorder them.
-- **Parts, prologues, interludes and epilogues.** Sections can be Chapters, Parts, a Prologue, Interludes or an Epilogue. In **Chapters** view, each Part is a coloured bar over the chapters it contains. Double-click a bar (or a part heading in the Outline) for **Part details**: title, colour and description, its chapters with scene counts and POVs, the story time it spans, and its summary cards. Drop a card on a part’s bar to make it that part’s summary. Manage sections in *Manage → Chapters & parts*, from the **Section** button, or from a heading’s ⋯ menu.
+- **Board.** Plotlines are rows and chapters are columns, in reading order. Drag cards between cells and reorder them within a cell. Drag row and column headers to reorder them. Cards with a plotline but no chapter wait in a **No chapter yet** column.
+- **Flexible planning.** Add **Planning** sections (💡) as loose buckets for ideas, worldbuilding or "what if" scenes. They show on the board like chapters, but they aren’t numbered or exported as manuscript. When you’re ready, drag their cards into chapters, or turn the whole section into a chapter with **Make it a Chapter**.
+- **Parts, prologues, interludes and epilogues.** Sections can be Chapters, Parts, a Prologue, Interludes, an Epilogue or Planning. On the board, each Part is a coloured bar over the chapters it contains. Double-click a bar (or a part heading in the Outline) for **Part details**: title, colour and description, its chapters with scene counts and POVs, the plotlines involved, and its summary cards. Drop a card on a part’s bar to make it that part’s summary. Manage sections in *Manage → Chapters & parts*, from the **Section** button, or from a heading’s ⋯ menu.
 - **Collapsible cards.** Fold any card down to its title and POV tag with the ⌃ button on the card (or its ⋯ menu), or use **Collapse all / Expand all** in the toolbar for a compact overview. Each card remembers its state.
 - **Multiple POVs.** Each scene can have a POV character, shown as a coloured badge. The POV filter fades out the other characters’ scenes.
-- **Off-screen events.** Events that happen in the story world but aren’t on the page. They sit on their plotline, can influence other events, and appear in the Outline at their point in story time.
+- **Off-screen events.** Events that happen in the story world but aren’t on the page. They sit in a chapter as “meanwhile, off-screen” moments and can influence other events.
 - **Influences.** Link any event to the events it causes, with a note on how. Hover over a card and drag its **→** handle onto another card to draw a link, or add links in the edit dialog. Links are drawn as arrows on the board. Hover over a card to trace them and read the notes.
 - **Outline.** Manuscript order, grouped by chapter. Drag scenes to reorder them or move them between chapters, and drag chapter headings to reorder chapters. Flashbacks are marked, and each scene lists what shaped it and what it leads to.
 - **Idea shelf.** **Unplaced** (new ideas), **Later** (saved for later) and **Archive**. Restoring an idea puts it back where it was. Deleting always asks you to confirm. Collapse the shelf (**Collapse »** in its header, or the toolbar’s **Shelf** button) to a slim strip that still shows counts, still accepts dropped cards, and has a **+** button for jotting down ideas.
@@ -43,7 +40,7 @@ Put templates in your templates folder (default `Templates`; change it in the pl
 |---|---|
 | `{{title}}`, `{{summary}}` | The scene’s title and summary |
 | `{{novel}}`, `{{plotline}}`, `{{pov}}` | Novel, plotline, POV character |
-| `{{when}}`, `{{chapter}}` | Story-time event, chapter or section |
+| `{{chapter}}` | Chapter or section |
 | `{{part}}` | The Part it falls in |
 | `{{offscreen}}`, `{{status}}`, `{{id}}` | Flags and the scene’s Plot Weaver id |
 | `{{shapedBy}}`, `{{leadsTo}}` | Bullet lists of influence links, with their notes |
@@ -56,7 +53,7 @@ Anything else, including Templater `<% %>` code, is left untouched. Plot Weaver 
 - **Open board**
 - **Toggle full screen**: you can give it a hotkey in *Settings → Hotkeys*
 - **Capture an idea**: adds an idea to the Unplaced shelf from anywhere
-- **Manage plotlines, POVs, story time and chapters**
+- **Manage plotlines, POVs and chapters**
 - **Export outline to note**
 - **Add example series (linked novels)**
 

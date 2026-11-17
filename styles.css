@@ -531,3 +531,14 @@
 .pw-og-part > .pw-chapter { border-bottom-color: var(--pw-part, var(--interactive-accent)); }
 .pw-og-part > .pw-chapter .pw-kind-icon { color: var(--pw-part, var(--interactive-accent)); }
 .pw-part-desc-line { margin: -2px 0 8px 22px; font-size: 12.5px; color: var(--text-muted); font-style: italic; }
+
+/* ---------- planning sections (chapters are the only columns) */
+.pw-slot-header.pw-kind-planning {
+  background: repeating-linear-gradient(135deg, var(--background-secondary) 0 8px, color-mix(in srgb, #e0a030 10%, var(--background-secondary)) 8px 16px);
+  font-style: italic; color: var(--text-muted);
+}
+.pw-slot-header.pw-kind-planning .pw-kind-icon { color: #e0a030; }
+.pw-og-planning > .pw-chapter { border-bottom-style: dashed; color: var(--text-muted); }
+.pw-og-planning > .pw-chapter .pw-kind-icon { color: #e0a030; }
+.pw-og-planning .pw-orow { opacity: .85; }
+.pw-card-meta.is-planning .pw-chapter-chip::before { content: "💡 "; }
