@@ -1338,50 +1338,111 @@ class PlotWeaverView extends ItemView {
     return m.status ? '__other' : '__nostatus';
   }
 
-  /** A strip under the toolbar summing up the scenes' notes: total words and how many scenes are at each status. */
+  /** A strip under the toolbar: words and status from the scenes' notes, POVs, structure, and cause-and-effect links. */
   renderStats(root, n) {
     const scenes = n.beats.filter(b => NV.onBoard(n, b) && !b.offscreen && !NV.isSummary(n, b) && !NV.isPlanning(n, b));
-    if (!scenes.some(b => b.notePath)) { if (this.ui.statusFilter) this.ui.statusFilter = null; return; }
+    this.statPct = '';
     const bar = root.createDiv('pw-stats');
-    const words = this.plugin.wordsOf(scenes);
-    const w = bar.createDiv('pw-stat-words');
-    w.createSpan({ cls: 'pw-stat-num', text: words !== null ? words.toLocaleString() : '—' });
-    w.createSpan({ cls: 'pw-stat-label', text: 'words' });
-    const counts = new Map();
-    for (const b of scenes) { const k = this.statusKey(b); counts.set(k, (counts.get(k) || 0) + 1); }
-    const defs = this.plugin.data.settings.statuses || [];
-    const buckets = defs.map(d => ({ key: d.name, label: d.name, icon: d.icon, color: d.color }))
-      .concat([
-        { key: '__other', label: 'Other status', icon: 'help', color: 'var(--text-faint)' },
-        { key: '__nostatus', label: 'No status', icon: 'minus', color: 'var(--text-faint)' },
-        { key: '__nonote', label: 'No note', icon: 'file', color: 'var(--text-faint)' },
-      ]).filter(x => counts.get(x.key));
-    // A slim progress bar, one segment per status.
-    const prog = bar.createDiv('pw-stat-progress');
-    for (const x of buckets) {
-      const seg = prog.createDiv('pw-stat-seg');
-      seg.style.flex = String(counts.get(x.key));
-      seg.style.background = x.key.startsWith('__') ? 'var(--background-modifier-border)' : x.color;
-      seg.setAttr('aria-label', `${x.label}: ${plural(counts.get(x.key), 'scene')}`);
-    }
-    const chips = bar.createDiv('pw-stat-chips');
-    for (const x of buckets) {
-      const chip = chips.createDiv('pw-stat-chip');
-      chip.toggleClass('is-active', this.ui.statusFilter === x.key);
-      chip.toggleClass('is-faint', x.key.startsWith('__'));
-      if (!x.key.startsWith('__')) {
-        const ic = chip.createSpan('pw-status-icon');
-        ic.style.setProperty('--pw-status', x.color);
-        setIcon(ic, x.icon);
+    const group = cls => { const g = bar.createDiv(`pw-stat-group ${cls || ''}`); return g; };
+    const chip = (parent, opts) => {
+      const c = parent.createDiv('pw-stat-chip');
+      if (opts.active) c.addClass('is-active');
+      if (opts.faint) c.addClass('is-faint');
+      if (opts.icon) {
+        const ic = c.createSpan(opts.status ? 'pw-status-icon' : 'pw-stat-icon');
+        if (opts.color) ic.style.setProperty('--pw-status', opts.color);
+        setIcon(ic, opts.icon);
       }
-      chip.createSpan({ cls: 'pw-stat-chip-label', text: x.label });
-      chip.createSpan({ cls: 'pw-stat-chip-n', text: String(counts.get(x.key)) });
-      chip.setAttr('aria-label', this.ui.statusFilter === x.key ? 'Show all scenes' : `Highlight scenes: ${x.label}`);
-      chip.onclick = () => this.setUi({ statusFilter: this.ui.statusFilter === x.key ? null : x.key });
+      if (opts.badge) { const pb = c.createSpan({ cls: 'pw-pov', text: opts.badge }); pb.style.setProperty('--pw-pov', opts.color); }
+      if (opts.label) c.createSpan({ cls: 'pw-stat-chip-label', text: opts.label });
+      c.createSpan({ cls: 'pw-stat-chip-n', text: String(opts.n) });
+      if (opts.tip) c.setAttr('aria-label', opts.tip);
+      if (opts.onClick) c.onclick = opts.onClick; else c.addClass('is-static');
+      return c;
+    };
+
+    // Words and status, from the linked notes' properties.
+    if (scenes.some(b => b.notePath)) {
+      const g = group('pw-stat-notes');
+      const words = this.plugin.wordsOf(scenes);
+      const w = g.createDiv('pw-stat-words');
+      w.createSpan({ cls: 'pw-stat-num', text: words !== null ? words.toLocaleString() : '—' });
+      w.createSpan({ cls: 'pw-stat-label', text: 'words' });
+      const counts = new Map();
+      for (const b of scenes) { const k = this.statusKey(b); counts.set(k, (counts.get(k) || 0) + 1); }
+      const defs = this.plugin.data.settings.statuses || [];
+      const buckets = defs.map(d => ({ key: d.name, label: d.name, icon: d.icon, color: d.color }))
+        .concat([
+          { key: '__other', label: 'Other status' },
+          { key: '__nostatus', label: 'No status' },
+          { key: '__nonote', label: 'No note' },
+        ]).filter(x => counts.get(x.key));
+      const prog = g.createDiv('pw-stat-progress');
+      for (const x of buckets) {
+        const seg = prog.createDiv('pw-stat-seg');
+        seg.style.flex = String(counts.get(x.key));
+        seg.style.background = x.key.startsWith('__') ? 'var(--background-modifier-border)' : x.color;
+        seg.setAttr('aria-label', `${x.label}: ${plural(counts.get(x.key), 'scene')}`);
+      }
+      const chips = g.createDiv('pw-stat-chips');
+      for (const x of buckets) {
+        const on = this.ui.statusFilter === x.key;
+        chip(chips, {
+          icon: x.key.startsWith('__') ? null : x.icon, status: true, color: x.color, label: x.key.startsWith('__') ? x.label : null, n: counts.get(x.key),
+          faint: x.key.startsWith('__'), active: on, tip: `${x.label}: ${plural(counts.get(x.key), 'scene')}${on ? ' (click to show all)' : ' (click to highlight)'}`,
+          onClick: () => this.setUi({ statusFilter: on ? null : x.key }),
+        });
+      }
+      const last = defs[defs.length - 1];
+      const done = last ? counts.get(last.name) || 0 : 0;
+      if (last && scenes.length) this.statPct = `${Math.round((done / scenes.length) * 100)}% ${last.name.toLowerCase()}`;
+    } else if (this.ui.statusFilter) {
+      this.ui.statusFilter = null;
     }
-    const done = defs.length ? counts.get(defs[defs.length - 1].name) || 0 : 0;
-    bar.createDiv({ cls: 'pw-stat-total', text: `${plural(scenes.length, 'scene')}${defs.length && done ? ` · ${Math.round((done / scenes.length) * 100)}% ${defs[defs.length - 1].name.toLowerCase()}` : ''}` });
+
+    // POV: scenes per viewpoint character (click to filter, like the POV menu).
+    if (n.povs.length) {
+      const g = group('pw-stat-povs');
+      g.createSpan({ cls: 'pw-stat-title', text: 'POV' });
+      for (const p of n.povs) {
+        const k = scenes.filter(b => b.povId === p.id).length;
+        const on = this.ui.povFilter === p.id;
+        chip(g, { badge: p.name, color: p.color, n: k, active: on, faint: !k, tip: on ? 'Show all POVs' : `Only ${p.name}’s scenes`,
+          onClick: () => this.setUi({ povFilter: on ? 'all' : p.id }) });
+      }
+      const none = scenes.filter(b => !b.povId).length;
+      if (none) {
+        const on = this.ui.povFilter === 'none';
+        chip(g, { label: 'No POV', n: none, faint: true, active: on, tip: on ? 'Show all POVs' : 'Only scenes with no POV set',
+          onClick: () => this.setUi({ povFilter: on ? 'all' : 'none' }) });
+      }
+    }
+
+    // Structure: parts, chapters and the other section kinds that are present.
+    if (n.chapters.length) {
+      const g = group('pw-stat-structure');
+      g.createSpan({ cls: 'pw-stat-title', text: 'Book' });
+      for (const k of SECTION_KINDS) {
+        const count = n.chapters.filter(c => NV.kind(c) === k.key).length;
+        if (!count && k.key !== 'part' && k.key !== 'chapter') continue;
+        const label = count === 1 ? k.label : (k.key === 'planning' ? 'Planning' : `${k.label}s`);
+        chip(g, { icon: k.icon, n: count, faint: !count, tip: `${label}: ${count}` });
+      }
+    }
+
+    // Cause-and-effect links that touch this novel.
+    const novels = this.novels;
+    let inside = 0, fromLinked = 0, intoLater = 0;
+    for (const b of n.beats) for (const i of b.influences) { if (XN.targetNovelId(n, i) === n.id) inside++; else intoLater++; }
+    for (const nv of novels) if (nv.id !== n.id) for (const b of nv.beats) for (const i of b.influences) if (i.novel === n.id) fromLinked++;
+    const lg = group('pw-stat-links');
+    lg.createSpan({ cls: 'pw-stat-title', text: 'Links' });
+    const tip = [`${inside} within this book`, fromLinked ? `${fromLinked} from linked novels` : '', intoLater ? `${intoLater} into later books` : ''].filter(Boolean).join(' · ');
+    chip(lg, { icon: 'git-merge', n: inside + fromLinked + intoLater, tip });
+
+    bar.createDiv({ cls: 'pw-stat-total', text: [plural(scenes.length, 'scene'), this.statPct].filter(Boolean).join(' · ') });
   }
+
 
   newBeat(preset) {
     const b = makeBeat(preset);

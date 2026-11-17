@@ -588,3 +588,19 @@
 .pw-stat-chip.is-faint { padding-left: 8px; color: var(--text-faint); }
 .pw-stat-chip-n { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-normal); }
 .pw-stat-total { margin-left: auto; color: var(--text-faint); }
+
+/* stats strip groups */
+.pw-stats { gap: 0; row-gap: 6px; }
+.pw-stat-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 0 12px; border-left: 1px solid var(--background-modifier-border); }
+.pw-stat-group:first-child { padding-left: 0; border-left: none; }
+.pw-stat-notes { gap: 12px; }
+.pw-stat-title { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .05em; margin-right: 2px; }
+.pw-stat-pct { color: var(--text-muted); white-space: nowrap; }
+.pw-stat-icon { display: inline-flex; color: var(--text-muted); }
+.pw-stat-icon svg { width: 14px; height: 14px; }
+.pw-stat-chip.is-static { cursor: default; }
+.pw-stat-chip.is-static:hover { background: transparent; color: var(--text-muted); }
+.pw-stat-chip .pw-pov { font-size: 11px; }
+.pw-stat-chip.is-faint .pw-pov { opacity: .55; }
+.pw-stat-total { padding-left: 12px; }
+.pw-stat-group:first-child, .pw-stat-group.pw-row-start { padding-left: 0; border-left: none; }
