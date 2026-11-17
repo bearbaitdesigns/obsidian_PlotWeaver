@@ -27,6 +27,20 @@ const DEFAULT_SETTINGS = {
 };
 const DEFAULT_UI = { mode: 'board', columns: 'time', shelfTab: 'unplaced', shelfCollapsed: false, showArrows: true, showOffscreen: true, povFilter: 'all' };
 
+/** Book structure. A Part is a divider that groups the chapters after it; a card assigned to a Part is its summary. */
+const SECTION_KINDS = [
+  { key: 'part', label: 'Part', icon: 'library' },
+  { key: 'prologue', label: 'Prologue', icon: 'sunrise' },
+  { key: 'chapter', label: 'Chapter', icon: 'book-open' },
+  { key: 'interlude', label: 'Interlude', icon: 'coffee' },
+  { key: 'epilogue', label: 'Epilogue', icon: 'sunset' },
+];
+const WHERE = [
+  { key: 'both', label: 'Board and Outline', desc: 'A planning card that is also a scene in the manuscript.' },
+  { key: 'board', label: 'Board only', desc: 'Big-picture planning or a summary; its scenes carry it in the Outline.' },
+  { key: 'outline', label: 'Outline only', desc: 'A manuscript scene that doesn’t need its own card on the board.' },
+];
+
 const SHELF_TABS = [
   { key: 'unplaced', label: 'Unplaced', icon: 'inbox', hint: 'Active ideas not yet placed in story time or a chapter. Drag one onto the board to place it.' },
   { key: 'parked', label: 'Later', icon: 'clock', hint: 'Saved for later: kept safe, but off the board. Restoring returns an idea to where it was.' },
@@ -46,6 +60,7 @@ function svg(tag, attrs) {
   for (const k in attrs || {}) e.setAttribute(k, attrs[k]);
   return e;
 }
+function createSpanEl(cls) { const e = document.createElement('span'); e.className = cls; return e; }
 function plural(n, w) { return `${n} ${w}${n === 1 ? '' : 's'}`; }
 function pad(x) { return String(x).padStart(2, '0'); }
 
@@ -53,7 +68,7 @@ function makeBeat(fields) {
   return Object.assign({
     id: uid(), title: 'Untitled', summary: '', plotlineId: null, povId: null, slotId: null, chapterId: null,
     offscreen: false, status: 'active', order: 0, shelfOrder: Date.now(),
-    notePath: null, influences: [], created: Date.now(),
+    notePath: null, influences: [], created: Date.now(), where: 'both', parentId: null,
   }, fields || {});
 }
 
@@ -99,6 +114,12 @@ function normalizeNovel(n) {
     }
   }
   for (const b of n.beats) delete b.chapter;
+  n.chapters = n.chapters.map(c => Object.assign({ kind: 'chapter' }, c));
+  const beatIds = new Set(n.beats.map(b => b.id));
+  for (const b of n.beats) {
+    if (!['both', 'board', 'outline'].includes(b.where)) b.where = 'both';
+    if (b.parentId && (!beatIds.has(b.parentId) || b.parentId === b.id)) b.parentId = null;
+  }
   return n;
 }
 
@@ -115,8 +136,14 @@ function makeExampleNovel() {
   n.povs.push(mara, hale, quill);
   const S = ['Ten years earlier', 'The offer', 'Preparations', 'The night of the job', 'Morning after', 'One month later'].map(label => ({ id: uid(), label }));
   n.slots = S;
-  const C = ['A Fortune in Glass', 'Demotion', 'Rag Paper', 'Constable Hale', 'The Supplier', 'Ten Minutes Past Two', 'Two Lanterns'].map((t, i) => ({ id: uid(), title: `${i + 1}. ${t}` }));
-  n.chapters = C;
+  const C = [
+    ['Chapter 1: A Fortune in Glass'], ['Chapter 2: Demotion'], ['Chapter 3: Rag Paper'], ['Interlude: Constable Hale', 'interlude'],
+    ['Chapter 4: The Supplier'], ['Chapter 5: Ten Minutes Past Two'], ['Chapter 6: Two Lanterns'],
+  ].map(([title, kind]) => ({ id: uid(), title, kind: kind || 'chapter' }));
+  const part1 = { id: uid(), title: 'Part One: The Job', kind: 'part' };
+  const part2 = { id: uid(), title: 'Part Two: Two Thefts', kind: 'part' };
+  const epilogue = { id: uid(), title: 'Epilogue', kind: 'epilogue' };
+  n.chapters = [part1, C[0], C[1], C[2], C[3], C[4], part2, C[5], C[6], epilogue];
   const B = (o) => { const b = makeBeat(o); n.beats.push(b); return b; };
   const flash = B({ title: 'Mara’s mentor is arrested', summary: 'Teenage Mara watches the only person who trusted her taken away — by a young constable named Hale.', plotlineId: heist.id, povId: mara.id, slotId: S[0].id, chapterId: C[3].id });
   const offer = B({ title: 'Mara gets the offer', summary: 'An anonymous client offers a fortune for the Harrow Lantern.', plotlineId: heist.id, povId: mara.id, slotId: S[1].id, chapterId: C[0].id });
@@ -140,7 +167,15 @@ function makeExampleNovel() {
   B({ title: 'Rooftop chase in the rain', summary: 'Hale nearly catches Quill.', plotlineId: inv.id });
   B({ title: 'Hale was in on it all along', summary: 'Too much of a cheat. Retired.', status: 'archived', plotlineId: inv.id });
   void fence;
-  n.manuscriptOrder = [offer, reassign, forge, rota, flash, paper, breakin, fake].map(b => b.id);
+  // A part summary, a board card broken down into outline scenes, and an outline-only epilogue scene.
+  B({ title: 'Two thefts, one night', summary: 'Part Two follows the fallout: what was really taken, and by whom.', plotlineId: inv.id, slotId: S[3].id, chapterId: part2.id });
+  breakin.where = 'board';
+  const kids = ['Through the skylight', 'The vault at ten past two', 'Something is wrong with the glass'].map((title, i) => B({
+    title, plotlineId: heist.id, povId: mara.id, slotId: S[3].id, chapterId: C[5].id, parentId: breakin.id, where: 'outline', order: breakin.order + (i + 1) / 10,
+  }));
+  kids[2].summary = 'The Lantern is lighter than it should be.';
+  B({ title: 'Mara watches the museum reopen', summary: 'A new Lantern in the case. She knows exactly what it is.', plotlineId: heist.id, povId: mara.id, slotId: S[5].id, chapterId: epilogue.id, where: 'outline' });
+  n.manuscriptOrder = [offer, reassign, forge, rota, flash, paper, ...kids, fake].map(b => b.id);
   return n;
 }
 
@@ -206,9 +241,39 @@ const NV = {
 
   /** Placed in story time (a board column). */
   hasTime(n, b) { return !!NV.slot(n, b.slotId); },
-  /** Assigned to a chapter (off-screen events never are). */
+  kind: c => (c && c.kind) || 'chapter',
+  kindInfo: c => SECTION_KINDS.find(k => k.key === NV.kind(c)) || SECTION_KINDS[2],
+  /** A card attached to a Part (rather than a chapter) is that Part's summary. */
+  isSummary(n, b) { return NV.hasChapter(n, b) && NV.kind(NV.chapter(n, b.chapterId)) === 'part'; },
+  partOf(n, sectionId) {
+    const i = NV.chapterIndex(n, sectionId);
+    for (let k = i; k >= 0; k--) if (NV.kind(n.chapters[k]) === 'part') return n.chapters[k];
+    return null;
+  },
+  showOnBoard: b => b.where !== 'outline',
+  inOutline: b => b.where !== 'board',
+  children: (n, id) => n.beats.filter(c => c.parentId === id && c.status !== 'archived'),
+  defaultSectionTitle(n, kind) {
+    const count = n.chapters.filter(c => NV.kind(c) === kind).length;
+    if (kind === 'part') return `Part ${count + 1}`;
+    if (kind === 'chapter') return `Chapter ${count + 1}`;
+    if (kind === 'interlude') return count ? `Interlude ${count + 1}` : 'Interlude';
+    return SECTION_KINDS.find(k => k.key === kind).label;
+  },
+  /** Assigned to a chapter or part (off-screen events never are). */
   hasChapter(n, b) { return !b.offscreen && !!NV.chapter(n, b.chapterId); },
-  isPlaced(n, b) { return !!NV.plotline(n, b.plotlineId) && (NV.hasTime(n, b) || NV.hasChapter(n, b)); },
+  parent: (n, b) => (b.parentId ? NV.beat(n, b.parentId) : null),
+  /** Story time: the card's own, or (for a scene broken out of a bigger card) its parent's. */
+  timeOf(n, b) { const own = NV.slot(n, b.slotId); if (own) return own; const p = NV.parent(n, b); return p ? NV.slot(n, p.slotId) : null; },
+  isPlaced(n, b) { return !!NV.plotline(n, b.plotlineId) && (!!NV.timeOf(n, b) || NV.hasChapter(n, b)); },
+  /** Scenes broken out of this card, in reading order. */
+  scenesOf(n, b) {
+    const kids = NV.children(n, b.id);
+    if (!kids.length) return [];
+    const order = new Map(NV.sequence(n, () => true).map((x, i) => [x.id, i]));
+    return kids.sort((a, c) => (order.has(a.id) ? order.get(a.id) : 1e6) - (order.has(c.id) ? order.get(c.id) : 1e6));
+  },
+  sectionLabel(n, id) { const c = NV.chapter(n, id); return c ? c.title : ''; },
   onBoard(n, b) {
     if (b.status !== 'active' || !NV.isPlaced(n, b)) return false;
     return !NV.plotline(n, b.plotlineId).archived;
@@ -221,8 +286,8 @@ const NV = {
   },
   /** Story-time cell. slotId null = the "no story time yet" column. */
   cell(n, slotId, plotlineId, excludeId) {
-    return n.beats.filter(b => b.id !== excludeId && b.status === 'active' && b.plotlineId === plotlineId
-      && (slotId ? b.slotId === slotId : (NV.onBoard(n, b) && !NV.hasTime(n, b))))
+    return n.beats.filter(b => b.id !== excludeId && b.status === 'active' && b.plotlineId === plotlineId && NV.showOnBoard(b)
+      && (slotId ? b.slotId === slotId : (NV.onBoard(n, b) && !NV.timeOf(n, b))))
       .sort((a, b) => a.order - b.order);
   },
   /** Chapter cell, in reading order. chapterId null = the "no chapter yet" column. */
@@ -238,7 +303,7 @@ const NV = {
     return c.length ? Math.max(...c.map(b => b.order)) + 1 : 0;
   },
   chronoCmp(n) {
-    const si = b => { const i = NV.slotIndex(n, b.slotId); return i < 0 ? 1e6 : i; };
+    const si = b => { const t = NV.timeOf(n, b); const i = t ? NV.slotIndex(n, t.id) : -1; return i < 0 ? 1e6 : i; };
     return (a, b) => (si(a) - si(b)) || (NV.laneIndex(n, a.plotlineId) - NV.laneIndex(n, b.plotlineId)) || (a.order - b.order);
   },
   /** Insert b right after its chronological predecessor in list (or before its successor). */
@@ -255,8 +320,9 @@ const NV = {
     list.splice(succ >= 0 ? succ : list.length, 0, b);
   },
   /** On-screen scenes in the writer's manual order; new ones slot in by story time. */
-  sequence(n) {
-    const eligible = n.beats.filter(b => NV.onBoard(n, b) && !b.offscreen);
+  sequence(n, filter) {
+    const keep = filter || NV.inOutline;
+    const eligible = n.beats.filter(b => NV.onBoard(n, b) && !b.offscreen && keep(b));
     const byId = new Map(eligible.map(b => [b.id, b]));
     const known = (n.manuscriptOrder || []).filter(id => byId.has(id)).map(id => byId.get(id));
     const knownSet = new Set(known.map(b => b.id));
@@ -266,17 +332,17 @@ const NV = {
     return result;
   },
   /** Reading order: grouped by chapter (in chapter order), unassigned scenes last. */
-  manuscript(n) {
-    const seq = NV.sequence(n);
+  manuscript(n, filter) {
+    const seq = NV.sequence(n, filter);
     const ci = b => (NV.hasChapter(n, b) ? NV.chapterIndex(n, b.chapterId) : (n.chapters || []).length);
     return seq.map((b, i) => ({ b, i })).sort((x, y) => (ci(x.b) - ci(y.b)) || (x.i - y.i)).map(x => x.b);
   },
   /** Off-screen events with a story time, each placed after its chronological predecessor. */
   withOffscreen(n, list) {
     const cmp = NV.chronoCmp(n);
-    const off = n.beats.filter(b => NV.onBoard(n, b) && b.offscreen && NV.hasTime(n, b)).sort(cmp);
-    // Weave into the chaptered manuscript when there is one; scenes still waiting for a chapter don't anchor events.
-    const chaptered = list.filter(b => NV.hasChapter(n, b) && NV.hasTime(n, b));
+    const off = n.beats.filter(b => NV.onBoard(n, b) && b.offscreen && NV.timeOf(n, b) && NV.inOutline(b)).sort(cmp);
+    // Weave into the chaptered manuscript when there is one; scenes still waiting for a chapter (and part summaries) don't anchor events.
+    const chaptered = list.filter(b => NV.hasChapter(n, b) && NV.timeOf(n, b) && !NV.isSummary(n, b));
     if (!chaptered.length) {
       const out = list.slice();
       for (const b of off) NV.placeChrono(out, b, cmp);
@@ -332,7 +398,7 @@ const NV = {
   assignChapter(n, id, chapterId, beforeId) {
     const b = NV.beat(n, id); if (!b) return;
     b.chapterId = chapterId || null;
-    const seq = NV.sequence(n).map(x => x.id).filter(x => x !== id);
+    const seq = NV.sequence(n, () => true).map(x => x.id).filter(x => x !== id);
     let idx = beforeId ? seq.indexOf(beforeId) : -1;
     if (idx < 0) idx = seq.length; // manuscript() regroups, so the end of seq = end of its chapter
     seq.splice(idx, 0, id);
@@ -358,7 +424,10 @@ const NV = {
     else { b.slotId = null; b.shelfOrder = Date.now(); }
   },
   remove(n, id) {
+    const removed = NV.beat(n, id);
     n.beats = n.beats.filter(b => b.id !== id);
+    const gone = { slotId: removed ? removed.slotId : null };
+    for (const b of n.beats) if (b.parentId === id) { b.parentId = null; if (!b.slotId && gone.slotId) b.slotId = gone.slotId; }
     n.manuscriptOrder = n.manuscriptOrder.filter(x => x !== id);
     for (const b of n.beats) b.influences = b.influences.filter(i => i.to !== id);
   },
@@ -649,26 +718,58 @@ class BeatModal extends Modal {
       dd.onChange(v => { d.slotId = v || null; });
     });
 
-    new Setting(c).setName('Chapter')
-      .setDesc(d.offscreen ? 'Off-screen events aren’t part of a chapter.' : 'Assign when you’re ready. Scenes without one wait in “No chapter yet”.')
+    new Setting(c).setName('Chapter or section')
+      .setDesc(d.offscreen ? 'Off-screen events aren’t part of the manuscript.' : 'Assign when you’re ready. Putting a card in a Part makes it that part’s summary.')
       .addDropdown(dd => {
         dd.addOption('', '— no chapter yet —');
-        n.chapters.forEach(ch => dd.addOption(ch.id, ch.title));
-        dd.addOption('__new', '＋ New chapter…');
+        n.chapters.forEach(ch => {
+          const kind = NV.kind(ch);
+          const indent = kind !== 'part' && NV.partOf(n, ch.id) && kind !== 'prologue' && kind !== 'epilogue' ? '   ' : '';
+          dd.addOption(ch.id, indent + (kind === 'part' ? `${ch.title}  (summary)` : ch.title));
+        });
+        for (const k of SECTION_KINDS) dd.addOption(`__new:${k.key}`, `＋ New ${k.label.toLowerCase()}…`);
         dd.setValue(NV.chapter(n, d.chapterId) ? d.chapterId : '');
         dd.selectEl.disabled = !!d.offscreen;
         dd.onChange(v => {
-          if (v !== '__new') { d.chapterId = v || null; return; }
+          if (!v.startsWith('__new:')) { d.chapterId = v || null; return; }
           dd.setValue(d.chapterId || '');
-          new TextPromptModal(this.app, 'New chapter', `e.g. Chapter ${n.chapters.length + 1}`, `Chapter ${n.chapters.length + 1}`, title => {
-            const ch = { id: uid(), title };
-            n.chapters.push(ch);
-            d.chapterId = ch.id;
-            this.plugin.commit();
-            this.draw();
-          }).open();
+          this.plugin.addSection(n, v.slice(6), null, sec => { d.chapterId = sec.id; this.draw(); });
         });
       });
+
+    new Setting(c).setName('Show in')
+      .setDesc((WHERE.find(w => w.key === d.where) || WHERE[0]).desc)
+      .addDropdown(dd => {
+        for (const w of WHERE) dd.addOption(w.key, w.label);
+        dd.setValue(d.where || 'both');
+        dd.onChange(v => { d.where = v; this.draw(); });
+      });
+
+    if (!NV.children(n, d.id).length) {
+      new Setting(c).setName('Part of').setDesc('A scene broken out of a bigger card. It takes that card’s story time unless it has its own.')
+        .addDropdown(dd => {
+          dd.addOption('', '— stands on its own —');
+          const options = n.beats.filter(x => x.id !== d.id && !x.parentId && x.status !== 'archived').sort(NV.chronoCmp(n));
+          for (const x of options) {
+            const t = NV.timeOf(n, x);
+            dd.addOption(x.id, `${x.title}${t ? `  (${t.label})` : ''}`);
+          }
+          dd.setValue(NV.beat(n, d.parentId) ? d.parentId : '');
+          dd.onChange(v => { d.parentId = v || null; this.draw(); });
+        });
+    } else {
+      const kids = NV.scenesOf(n, d);
+      const box = c.createDiv('pw-field pw-kids');
+      box.createDiv({ cls: 'pw-field-label', text: `Scenes in this card (${kids.length})` });
+      for (const k of kids) {
+        const kc = NV.hasChapter(n, k) ? NV.chapter(n, k.chapterId) : null;
+        box.createDiv({ cls: 'pw-muted', text: `•  ${k.title}  —  ${kc ? kc.title : 'no chapter yet'}` });
+      }
+    }
+    if (!this.isNew && !d.parentId) {
+      new Setting(c).setName('Break down into scenes').setDesc('Split this card into scene cards for the manuscript. This card stays on the board as their summary.')
+        .addButton(btn => btn.setButtonText('Break down…').onClick(() => { this.save(); new BreakdownModal(this.plugin, n, this.beat).open(); }));
+    }
 
     new Setting(c).setName('Off-screen')
       .setDesc('Happens in the story world but isn’t shown on the page. It still sits on its plotline, appears in the outline at its point in story time, and can influence other events.')
@@ -723,6 +824,7 @@ class BeatModal extends Modal {
     }).filter(o => o.to && o.to !== d.id);
     const moved = this.isNew || d.slotId !== b.slotId || d.plotlineId !== b.plotlineId;
     if (moved && d.slotId && d.plotlineId) d.order = NV.nextOrder(n, d.slotId, d.plotlineId);
+    if (d.parentId && (d.parentId === d.id || NV.children(n, d.id).length)) d.parentId = null;
     if (this.isNew || d.status !== b.status || (moved && !d.slotId)) d.shelfOrder = Date.now();
     const chapterChanged = !this.isNew && (d.chapterId || null) !== (b.chapterId || null);
     Object.assign(b, d);
@@ -749,6 +851,62 @@ class BeatModal extends Modal {
   }
 }
 
+/** Split a card into scene cards. The card stays as their summary; scenes inherit its plotline, POV and story time. */
+class BreakdownModal extends Modal {
+  constructor(plugin, novel, beat) { super(plugin.app); Object.assign(this, { plugin, n: novel, beat }); }
+  onOpen() {
+    const n = this.n, b = this.beat, c = this.contentEl;
+    this.modalEl.addClass('pw-modal');
+    const existing = NV.children(n, b.id).length;
+    this.titleEl.setText(existing ? `Add scenes to “${b.title}”` : `Break “${b.title}” into scenes`);
+    c.createDiv({ cls: 'pw-muted', text: 'One scene per line. Each becomes its own card for the manuscript, sharing this card’s plotline, POV and story time. You can change any of them later, or detach them.' });
+    const ta = c.createEl('textarea', { cls: 'pw-textarea pw-breakdown' });
+    ta.rows = 6;
+    ta.placeholder = 'Through the skylight\nThe vault at ten past two\nSomething is wrong with the glass';
+    let chapterId = '', where = 'outline', parentWhere = existing ? b.where : 'board';
+    new Setting(c).setName('Put the scenes in').addDropdown(dd => {
+      dd.addOption('', '— no chapter yet (assign later) —');
+      n.chapters.filter(ch => NV.kind(ch) !== 'part').forEach(ch => dd.addOption(ch.id, ch.title));
+      dd.setValue(NV.hasChapter(n, b) && NV.kind(NV.chapter(n, b.chapterId)) !== 'part' ? b.chapterId : '');
+      chapterId = dd.selectEl.value;
+      dd.onChange(v => { chapterId = v; });
+    });
+    new Setting(c).setName('Scenes show in').addDropdown(dd => {
+      for (const w of WHERE) dd.addOption(w.key, w.label);
+      dd.setValue(where);
+      dd.onChange(v => { where = v; });
+    });
+    if (!existing) {
+      new Setting(c).setName('This card afterwards').setDesc('Usually a board-only summary, so the scenes carry it in the outline.').addDropdown(dd => {
+        dd.addOption('board', 'Board only (summary)');
+        dd.addOption('both', 'Keep it in the outline too');
+        dd.setValue(parentWhere);
+        dd.onChange(v => { parentWhere = v; });
+      });
+    }
+    const foot = c.createDiv('pw-modal-footer');
+    foot.createDiv('pw-spacer');
+    foot.createEl('button', { text: 'Cancel' }).onclick = () => this.close();
+    const ok = foot.createEl('button', { text: 'Create scenes', cls: 'mod-cta' });
+    ok.onclick = () => {
+      const titles = ta.value.split('\n').map(t => t.trim()).filter(Boolean);
+      if (!titles.length) { new Notice('Add at least one scene title.'); return; }
+      const kids = titles.map((title, i) => makeBeat({
+        title, plotlineId: b.plotlineId, povId: b.povId, parentId: b.id, chapterId: chapterId || null, where,
+        slotId: null, order: b.order + (existing + i + 1) / 100,
+      }));
+      n.beats.push(...kids);
+      if (!existing) b.where = parentWhere;
+      if (chapterId) for (const k of kids) NV.assignChapter(n, k.id, chapterId, null);
+      this.close();
+      this.plugin.commit();
+      new Notice(`Added ${plural(kids.length, 'scene')} to “${b.title}”.`);
+    };
+    setTimeout(() => ta.focus(), 20);
+  }
+  onClose() { this.contentEl.empty(); }
+}
+
 class ManageModal extends Modal {
   constructor(plugin, tab) { super(plugin.app); this.plugin = plugin; this.tab = tab || 'plotlines'; }
   get n() { return this.plugin.activeNovel(); }
@@ -761,7 +919,7 @@ class ManageModal extends Modal {
     const c = this.contentEl;
     c.empty();
     const tabs = c.createDiv('pw-mtabs');
-    for (const [k, label] of [['novel', 'Novel'], ['plotlines', 'Plotlines'], ['povs', 'POV characters'], ['slots', 'Story time'], ['chapters', 'Chapters']]) {
+    for (const [k, label] of [['novel', 'Novel'], ['plotlines', 'Plotlines'], ['povs', 'POV characters'], ['slots', 'Story time'], ['chapters', 'Chapters & parts']]) {
       const t = tabs.createDiv({ cls: 'pw-mtab', text: label });
       t.toggleClass('is-active', this.tab === k);
       t.onclick = () => { this.tab = k; this.draw(); };
@@ -892,22 +1050,33 @@ class ManageModal extends Modal {
 
   draw_chapters(c) {
     const n = this.n;
-    c.createDiv({ cls: 'pw-muted', text: 'Chapters in reading order. Assign scenes to them whenever you’re ready, from a card’s menu, the edit dialog, or by switching the board’s columns to Chapters.' });
+    c.createDiv({ cls: 'pw-muted', text: 'The manuscript’s structure in reading order. A Part groups the chapters and interludes after it; a card assigned to a Part becomes its summary. Prologues and epilogues stand outside parts.' });
     n.chapters.forEach((ch, i) => {
+      const kind = NV.kind(ch);
       const row = c.createDiv('pw-mrow');
-      row.createSpan({ cls: 'pw-slot-num', text: String(i + 1) });
+      row.toggleClass('is-part', kind === 'part');
+      row.toggleClass('is-in-part', kind !== 'part' && kind !== 'prologue' && kind !== 'epilogue' && !!NV.partOf(n, ch.id));
+      const sel = row.createEl('select', { cls: 'dropdown pw-kind-select' });
+      for (const k of SECTION_KINDS) sel.createEl('option', { value: k.key, text: k.label });
+      sel.value = kind;
+      sel.onchange = () => this.plugin.setSectionKind(n, ch, sel.value, () => this.draw());
       const name = row.createEl('input', { type: 'text', cls: 'pw-mname' });
       name.value = ch.title; name.oninput = () => { ch.title = name.value || 'Untitled'; this.soft(); };
-      row.createSpan({ cls: 'pw-count', text: plural(n.beats.filter(b => b.chapterId === ch.id && NV.onBoard(n, b)).length, 'scene') });
+      const cnt = n.beats.filter(b => b.chapterId === ch.id && NV.onBoard(n, b)).length;
+      row.createSpan({ cls: 'pw-count', text: kind === 'part' ? (cnt ? 'summary' : '—') : plural(cnt, 'scene') });
       this.rowButtons(row, n.chapters, i);
       const del = row.createDiv('pw-icon-btn pw-danger'); setIcon(del, 'trash-2'); del.setAttr('aria-label', 'Delete');
       del.onclick = () => this.plugin.deleteChapter(n, ch, () => this.draw());
     });
     if (!n.chapters.length) c.createDiv({ cls: 'pw-empty', text: 'No chapters yet. Plan in story time first, and add chapters when you’re ready.' });
-    c.createEl('button', { text: '＋ Add chapter', cls: 'pw-small-btn' }).onclick = () => {
-      n.chapters.push({ id: uid(), title: `Chapter ${n.chapters.length + 1}` });
-      this.hard();
-    };
+    const adds = c.createDiv('pw-add-kinds');
+    for (const k of SECTION_KINDS) {
+      adds.createEl('button', { text: `＋ ${k.label}`, cls: 'pw-small-btn' }).onclick = () => {
+        const sec = { id: uid(), title: NV.defaultSectionTitle(n, k.key), kind: k.key };
+        if (k.key === 'prologue') n.chapters.unshift(sec); else n.chapters.push(sec);
+        this.hard();
+      };
+    }
   }
 }
 
@@ -1082,7 +1251,10 @@ class PlotWeaverView extends ItemView {
     const g3 = bar.createDiv('pw-tb-group pw-tb-actions');
     this.tbButton(g3, 'plus', 'Idea', () => this.newBeat({}), undefined, 'New event or idea');
     this.tbButton(g3, 'rows-3', 'Plotline', () => this.plugin.addPlotline(n), undefined, 'Add a plotline (row)');
-    if (this.byChapter || this.ui.mode === 'outline') this.tbButton(g3, 'book-open', 'Chapter', () => this.plugin.addChapter(n, n.chapters.length), undefined, 'Add a chapter');
+    if (this.byChapter || this.ui.mode === 'outline') {
+      const secBtn = this.tbButton(g3, 'book-open', 'Section', () => {}, undefined, 'Add a chapter, part, prologue, interlude or epilogue');
+      secBtn.onclick = e => this.plugin.addSectionMenu(n, n.chapters.length, e);
+    }
     else this.tbButton(g3, 'columns-3', 'Story event', () => this.plugin.addSlot(n, n.slots.length), undefined, 'Add a story-time event (column)');
     this.tbButton(g3, 'settings', '', () => new ManageModal(this.plugin).open(), undefined, 'Manage plotlines, POVs, story time, chapters and novels');
     this.tbButton(g3, 'file-output', '', () => this.plugin.exportOutline(n), undefined, 'Export outline to a note');
@@ -1113,11 +1285,11 @@ class PlotWeaverView extends ItemView {
     const byChapter = this.byChapter;
     let cols;
     if (byChapter) {
-      cols = n.chapters.map((c, i) => ({ id: c.id, label: c.title, item: c, i }));
+      cols = n.chapters.map((c, i) => ({ id: c.id, label: c.title, item: c, i, kind: NV.kind(c) }));
       cols.push({ id: null, label: 'No chapter yet', staging: true, hint: 'On-screen scenes placed in story time but not yet in a chapter. Drag them into a chapter when you’re ready.' });
     } else {
       cols = n.slots.map((s, i) => ({ id: s.id, label: s.label, item: s, i }));
-      if (n.beats.some(b => NV.onBoard(n, b) && !NV.hasTime(n, b))) {
+      if (n.beats.some(b => NV.onBoard(n, b) && NV.showOnBoard(b) && !NV.timeOf(n, b))) {
         cols.push({ id: null, label: 'No story time yet', staging: true, hint: 'Scenes assigned to a chapter but not yet placed in story time.' });
       }
     }
@@ -1155,7 +1327,7 @@ class PlotWeaverView extends ItemView {
     const addCol = grid.createDiv('pw-add-col');
     setIcon(addCol, 'plus');
     addCol.setAttr('aria-label', byChapter ? 'Add chapter' : 'Add story-time event');
-    addCol.onclick = () => (byChapter ? this.plugin.addChapter(n, n.chapters.length) : this.plugin.addSlot(n, n.slots.length));
+    addCol.onclick = e => (byChapter ? this.plugin.addSectionMenu(n, n.chapters.length, e) : this.plugin.addSlot(n, n.slots.length));
 
     for (const p of lanes) {
       this.renderLaneHeader(grid, n, p);
@@ -1223,7 +1395,15 @@ class PlotWeaverView extends ItemView {
       h.setAttr('aria-label', col.hint);
       return;
     }
-    h.createSpan({ cls: 'pw-slot-num', text: String(col.i + 1) });
+    if (byChapter && col.item) {
+      const k = NV.kindInfo(col.item);
+      h.addClass(`pw-kind-${k.key}`);
+      const ic = h.createSpan('pw-kind-icon');
+      setIcon(ic, k.icon);
+      ic.setAttr('aria-label', k.label);
+    } else {
+      h.createSpan({ cls: 'pw-slot-num', text: String(col.i + 1) });
+    }
     const label = h.createSpan({ cls: 'pw-slot-label', text: col.label || 'Untitled' });
     label.setAttr('aria-label', 'Double-click to rename · drag to reorder');
     const count = byChapter
@@ -1234,9 +1414,9 @@ class PlotWeaverView extends ItemView {
     setIcon(more, 'more-horizontal');
     const arr = byChapter ? n.chapters : n.slots;
     const i = col.i;
-    const noun = byChapter ? 'chapter' : 'event';
+    const noun = byChapter ? NV.kindInfo(col.item).label.toLowerCase() : 'event';
     const rename = () => (byChapter ? this.plugin.renameChapter(n, col.item) : this.plugin.renameSlot(n, col.item));
-    const add = at => (byChapter ? this.plugin.addChapter(n, at) : this.plugin.addSlot(n, at));
+    const add = at => (byChapter ? this.plugin.addSectionMenu(n, at, null) : this.plugin.addSlot(n, at));
     const menu = e => {
       const m = new Menu();
       m.addItem(it => it.setTitle('Rename').setIcon('pencil').onClick(rename));
@@ -1245,6 +1425,13 @@ class PlotWeaverView extends ItemView {
       m.addSeparator();
       m.addItem(it => it.setTitle('Move left').setIcon('chevron-left').onClick(() => { NV.moveItem(arr, i, i - 1); this.plugin.commit(); }));
       m.addItem(it => it.setTitle('Move right').setIcon('chevron-right').onClick(() => { NV.moveItem(arr, i, i + 1); this.plugin.commit(); }));
+      if (byChapter) {
+        m.addSeparator();
+        for (const k of SECTION_KINDS) {
+          if (k.key === NV.kind(col.item)) continue;
+          m.addItem(it => it.setTitle(`Make it a ${k.label}`).setIcon(k.icon).onClick(() => this.plugin.setSectionKind(n, col.item, k.key)));
+        }
+      }
       m.addSeparator();
       m.addItem(it => it.setTitle(`Delete ${noun}…`).setIcon('trash-2').onClick(() => (byChapter ? this.plugin.deleteChapter(n, col.item) : this.plugin.deleteSlot(n, col.item))));
       m.showAtMouseEvent(e);
@@ -1388,8 +1575,33 @@ class PlotWeaverView extends ItemView {
 
     card.createDiv({ cls: 'pw-card-title', text: b.title || 'Untitled' });
     if (b.summary) card.createDiv({ cls: 'pw-card-summary', text: b.summary });
-    const slot = NV.slot(n, b.slotId);
+    const slot = NV.timeOf(n, b);
     const ch = NV.hasChapter(n, b) ? NV.chapter(n, b.chapterId) : null;
+    const parentBeat = NV.parent(n, b);
+    const scenes = where === 'board' ? NV.scenesOf(n, b) : [];
+    if (NV.isSummary(n, b)) card.addClass('pw-summary-card');
+    if (where === 'board' && b.where === 'board') {
+      const t = top.insertBefore(createSpanEl('pw-tag pw-tag-where'), top.firstChild);
+      setIcon(t, 'layout-grid');
+      t.createSpan({ text: scenes.length ? 'summary' : 'board only' });
+      t.setAttr('aria-label', scenes.length ? 'A summary card: its scenes carry it in the Outline' : 'Shows on the Story time board only, not in the Outline');
+    }
+    if (parentBeat && where !== 'shelf') card.createDiv({ cls: 'pw-parent-chip', text: `↳ part of ${parentBeat.title}` });
+    if (scenes.length) {
+      const box = card.createDiv('pw-scenes');
+      for (const k of scenes) {
+        const r = box.createDiv('pw-scene-row');
+        r.createSpan({ cls: 'pw-scene-dot' });
+        r.createSpan({ cls: 'pw-scene-title', text: k.title });
+        const kc = NV.hasChapter(n, k) ? NV.chapter(n, k.chapterId) : null;
+        r.createSpan({ cls: 'pw-scene-ch', text: kc ? kc.title : 'no chapter yet' });
+        r.onclick = e => { e.stopPropagation(); this.editBeat(k); };
+        r.addEventListener('dblclick', e => e.stopPropagation());
+        this.cardEls.set(k.id, card); // links to a scene attach to the card that holds it
+      }
+      const add = box.createDiv({ cls: 'pw-scene-add', text: '＋ scene' });
+      add.onclick = e => { e.stopPropagation(); new BreakdownModal(this.plugin, n, b).open(); };
+    }
     if (external) {
       const m = card.createDiv('pw-card-meta');
       m.createSpan({ cls: 'pw-novel-chip', text: n.title });
@@ -1403,8 +1615,8 @@ class PlotWeaverView extends ItemView {
       m.createSpan({ cls: 'pw-time-chip', text: slot ? slot.label : 'no story time yet' });
     } else if (ch) {
       const m = card.createDiv('pw-card-meta');
-      m.createSpan({ cls: 'pw-chapter-chip', text: ch.title });
-    } else if (!b.offscreen && n.chapters.length) {
+      m.createSpan({ cls: 'pw-chapter-chip', text: ch.title }).toggleClass('is-part', NV.kind(ch) === 'part');
+    } else if (!b.offscreen && n.chapters.length && !scenes.length && b.where !== 'board') {
       card.createDiv({ cls: 'pw-card-meta pw-faint', text: 'no chapter yet' });
     }
 
@@ -1429,26 +1641,24 @@ class PlotWeaverView extends ItemView {
   }
 
   pickChapter(n, b) {
-    const items = n.chapters.map((c, i) => ({
-      label: c.title, value: c.id, badge: String(n.beats.filter(x => x.chapterId === c.id && NV.onBoard(n, x)).length),
-      desc: i === NV.chapterIndex(n, b.chapterId) ? 'current' : '',
-    }));
+    const items = n.chapters.map((c, i) => {
+      const k = NV.kindInfo(c), part = NV.kind(c) !== 'part' ? NV.partOf(n, c.id) : null;
+      return {
+        label: c.title, value: c.id, badge: String(n.beats.filter(x => x.chapterId === c.id && NV.onBoard(n, x)).length),
+        desc: [k.key === 'part' ? 'Part: the card becomes its summary' : (part ? part.title : ''), i === NV.chapterIndex(n, b.chapterId) ? 'current' : ''].filter(Boolean).join(' · '),
+      };
+    });
     items.push({ label: '— No chapter yet —', value: '', sticky: true });
-    items.push({ label: '＋ New chapter…', value: '__new', sticky: true });
-    new PickerModal(this.app, `Chapter for “${b.title}”`, items, v => {
-      if (v === '__new') {
-        new TextPromptModal(this.app, 'New chapter', 'Title', `Chapter ${n.chapters.length + 1}`, title => {
-          const ch = { id: uid(), title };
-          n.chapters.push(ch);
-          NV.assignChapter(n, b.id, ch.id, null);
-          this.plugin.commit();
-        }).open();
+    for (const k of SECTION_KINDS) items.push({ label: `＋ New ${k.label.toLowerCase()}…`, value: `__new:${k.key}`, sticky: true });
+    new PickerModal(this.app, `Chapter or section for “${b.title}”`, items, v => {
+      if (v.startsWith('__new:')) {
+        this.plugin.addSection(n, v.slice(6), null, sec => { NV.assignChapter(n, b.id, sec.id, null); this.plugin.commit(); });
         return;
       }
       NV.assignChapter(n, b.id, v || null, null);
       if (!NV.isPlaced(n, b)) new Notice(`“${b.title}” has no story time or chapter now, so it moved to the Unplaced shelf.`);
       this.plugin.commit();
-    }, { selected: b.chapterId || '', placeholder: 'Find a chapter…' }).open();
+    }, { selected: b.chapterId || '', placeholder: 'Find a chapter, part, prologue…' }).open();
   }
 
   cardMenu(e, n, b) {
@@ -1464,6 +1674,16 @@ class PlotWeaverView extends ItemView {
     }
     m.addSeparator();
     if (!b.offscreen) m.addItem(it => it.setTitle(NV.hasChapter(n, b) ? 'Move to chapter…' : 'Assign to chapter…').setIcon('book-open').onClick(() => this.pickChapter(n, b)));
+    if (!b.parentId) m.addItem(it => it.setTitle(NV.children(n, b.id).length ? 'Add scenes…' : 'Break down into scenes…').setIcon('list-tree').onClick(() => new BreakdownModal(this.plugin, n, b).open()));
+    if (b.parentId) {
+      const par = NV.parent(n, b);
+      m.addItem(it => it.setTitle(`Detach from “${par ? par.title : 'parent'}”`).setIcon('unlink').onClick(() => { this.plugin.detachScene(n, b); }));
+    }
+    m.addSeparator();
+    for (const w of WHERE) {
+      m.addItem(it => it.setTitle(`${b.where === w.key ? '✓ ' : '    '}Show in: ${w.label}`).setIcon(w.key === 'board' ? 'layout-grid' : w.key === 'outline' ? 'list-ordered' : 'columns-3')
+        .onClick(() => { b.where = w.key; commit(); }));
+    }
     m.addItem(it => it.setTitle(b.offscreen ? 'Mark as on-screen' : 'Mark as off-screen').setIcon('eye-off').onClick(() => { b.offscreen = !b.offscreen; commit(); }));
     m.addItem(it => it.setTitle('Duplicate').setIcon('copy').onClick(() => {
       const c = makeBeat(Object.assign(clone(b), { id: uid(), title: `${b.title} (copy)`, notePath: null, influences: clone(b.influences), order: b.order + 0.5, shelfOrder: b.shelfOrder + 0.5 }));
@@ -1475,7 +1695,7 @@ class PlotWeaverView extends ItemView {
       m.addItem(it => it.setTitle('Save for later').setIcon('clock').onClick(() => { NV.moveToShelf(n, b.id, 'parked', null); commit(); }));
       m.addItem(it => it.setTitle('Archive').setIcon('archive').onClick(() => { NV.moveToShelf(n, b.id, 'archived', null); commit(); }));
     } else {
-      const where = NV.hasTime(n, b) ? `“${NV.slot(n, b.slotId).label}”` : NV.hasChapter(n, b) ? `“${NV.chapter(n, b.chapterId).title}”` : null;
+      const where = NV.timeOf(n, b) ? `“${NV.timeOf(n, b).label}”` : NV.hasChapter(n, b) ? `“${NV.chapter(n, b.chapterId).title}”` : null;
       m.addItem(it => it.setTitle(where && NV.plotline(n, b.plotlineId) ? `Restore to ${where}` : 'Restore to Unplaced').setIcon('rotate-ccw').onClick(() => { NV.restore(n, b.id); commit(); }));
       if (b.status === 'parked') m.addItem(it => it.setTitle('Archive').setIcon('archive').onClick(() => { NV.moveToShelf(n, b.id, 'archived', null); commit(); }));
       if (b.status === 'archived') m.addItem(it => it.setTitle('Save for later').setIcon('clock').onClick(() => { NV.moveToShelf(n, b.id, 'parked', null); commit(); }));
@@ -1613,9 +1833,10 @@ class PlotWeaverView extends ItemView {
       if (up.length) links.createSpan({ text: `Draws on: ${up.map(x => x.title).join(', ')}` });
       if (down.length) links.createSpan({ text: `Shapes: ${down.map(x => x.title).join(', ')}` });
     }
-    head.createDiv({ cls: 'pw-muted', text: 'The order readers meet your scenes, chapter by chapter. Drag scenes to rearrange them or move them between chapters; drag a chapter heading to reorder chapters. Off-screen events are woven in automatically at their point in story time.' });
+    head.createDiv({ cls: 'pw-muted', text: 'The order readers meet your scenes, part by part and chapter by chapter. Drag scenes to rearrange them or move them between chapters; drag a heading to reorder sections. Off-screen events are woven in automatically at their point in story time.' });
     const actions = head.createDiv('pw-outline-actions');
-    this.tbButton(actions, 'book-open', 'Add chapter', () => this.plugin.addChapter(n, n.chapters.length));
+    const addSec = this.tbButton(actions, 'plus', 'Add section', () => {});
+    addSec.onclick = e => this.plugin.addSectionMenu(n, n.chapters.length, e);
     this.tbButton(actions, 'rotate-ccw', 'Re-sort scenes by story time', () => {
       new ConfirmModal(this.app, 'Re-sort by story time?', 'Within each chapter, re-sort scenes chronologically, discarding your manual order. Chapter assignments are kept.', 'Re-sort', () => {
         n.manuscriptOrder = []; this.plugin.commit();
@@ -1625,11 +1846,13 @@ class PlotWeaverView extends ItemView {
     const onscreen = NV.manuscript(n);
     const merged = this.ui.showOffscreen ? NV.withOffscreen(n, onscreen) : onscreen;
     const groups = NV.groups(n, merged);
-    const numbers = new Map(onscreen.map((b, i) => [b.id, i + 1]));
+    const scenesOnly = onscreen.filter(b => !NV.isSummary(n, b));
+    const numbers = new Map(scenesOnly.map((b, i) => [b.id, i + 1]));
     let maxSlot = -1;
     const jumps = new Set();
-    for (const b of onscreen) {
-      const si = NV.slotIndex(n, b.slotId);
+    for (const b of scenesOnly) {
+      const t = NV.timeOf(n, b);
+      const si = t ? NV.slotIndex(n, t.id) : -1;
       if (si < 0) continue;
       if (si < maxSlot) jumps.add(b.id);
       maxSlot = Math.max(maxSlot, si);
@@ -1639,27 +1862,43 @@ class PlotWeaverView extends ItemView {
       scroller.createDiv({ cls: 'pw-empty', text: 'No scenes yet. Place events on the board and they’ll appear here.' });
     }
 
+    let inPart = false;
     for (const g of groups) {
       if (!g.chapter && !g.items.length && !n.chapters.length) continue;
+      const kind = g.chapter ? NV.kind(g.chapter) : null;
+      if (kind === 'part') inPart = true;
+      else if (kind === 'prologue' || kind === 'epilogue' || !g.chapter) inPart = false;
       const sec = scroller.createDiv('pw-ogroup');
+      if (kind) sec.addClass(`pw-og-${kind}`);
+      if (inPart && kind !== 'part') sec.addClass('pw-in-part');
       const gh = sec.createDiv('pw-chapter');
       if (g.chapter) {
         const ch = g.chapter;
         const ci = NV.chapterIndex(n, ch.id);
+        const k = NV.kindInfo(ch);
         setIcon(gh.createSpan('pw-grip'), 'grip-vertical');
+        const ic = gh.createSpan('pw-kind-icon');
+        setIcon(ic, k.icon);
+        ic.setAttr('aria-label', k.label);
         const t = gh.createSpan({ cls: 'pw-chapter-title', text: ch.title });
         t.addEventListener('dblclick', () => this.plugin.renameChapter(n, ch));
-        gh.createSpan({ cls: 'pw-count', text: plural(g.items.filter(b => !b.offscreen).length, 'scene') });
+        const nScenes = g.items.filter(b => !b.offscreen && !NV.isSummary(n, b)).length;
+        if (kind !== 'part' || nScenes) gh.createSpan({ cls: 'pw-count', text: plural(nScenes, 'scene') });
         gh.createDiv('pw-spacer');
         const more = gh.createDiv('pw-icon-btn');
         setIcon(more, 'more-horizontal');
         const menu = e => {
           const m = new Menu();
           m.addItem(it => it.setTitle('Rename').setIcon('pencil').onClick(() => this.plugin.renameChapter(n, ch)));
-          m.addItem(it => it.setTitle('Insert chapter before').setIcon('arrow-up').onClick(() => this.plugin.addChapter(n, ci)));
-          m.addItem(it => it.setTitle('Insert chapter after').setIcon('arrow-down').onClick(() => this.plugin.addChapter(n, ci + 1)));
+          m.addItem(it => it.setTitle('Insert section before…').setIcon('arrow-up').onClick(() => this.plugin.addSectionMenu(n, ci, e)));
+          m.addItem(it => it.setTitle('Insert section after…').setIcon('arrow-down').onClick(() => this.plugin.addSectionMenu(n, ci + 1, e)));
           m.addSeparator();
-          m.addItem(it => it.setTitle('Delete chapter…').setIcon('trash-2').onClick(() => this.plugin.deleteChapter(n, ch)));
+          for (const kk of SECTION_KINDS) {
+            if (kk.key === kind) continue;
+            m.addItem(it => it.setTitle(`Make it a ${kk.label}`).setIcon(kk.icon).onClick(() => this.plugin.setSectionKind(n, ch, kk.key)));
+          }
+          m.addSeparator();
+          m.addItem(it => it.setTitle(`Delete ${k.label.toLowerCase()}…`).setIcon('trash-2').onClick(() => this.plugin.deleteChapter(n, ch)));
           m.showAtMouseEvent(e);
         };
         more.onclick = e => { e.stopPropagation(); menu(e); };
@@ -1675,11 +1914,16 @@ class PlotWeaverView extends ItemView {
         if (n.chapters.length) sec.createDiv({ cls: 'pw-muted pw-loose-hint', text: 'Planned in story time but not yet assigned. Drag them into a chapter above when you’re ready.' });
       }
       const list = sec.createDiv('pw-outline-list');
-      for (const b of g.items) {
+      const items = g.items.filter(b => NV.isSummary(n, b)).concat(g.items.filter(b => !NV.isSummary(n, b)));
+      for (const b of items) {
         if (b.offscreen) this.renderOffscreenRow(list, n, b);
+        else if (NV.isSummary(n, b)) this.renderSummaryRow(list, n, b);
         else this.renderOutlineRow(list, n, b, numbers.get(b.id), jumps.has(b.id));
       }
-      if (!g.items.length) list.createDiv({ cls: 'pw-empty pw-drop-hint', text: g.chapter ? 'Drop scenes here' : 'All scenes are in chapters.' });
+      if (!g.items.length) {
+        const hint = kind === 'part' ? 'Drop a card here to make it this part’s summary (optional)' : g.chapter ? 'Drop scenes here' : 'All scenes are in chapters.';
+        list.createDiv({ cls: 'pw-empty pw-drop-hint', text: hint });
+      }
       const chapterId = g.chapter ? g.chapter.id : null;
       this.setupDropList(list, {
         itemSelector: '.pw-orow:not(.pw-orow-off)',
@@ -1695,7 +1939,7 @@ class PlotWeaverView extends ItemView {
   }
 
   renderOutlineRow(list, n, b, num, jump) {
-    const p = NV.plotline(n, b.plotlineId), pov = NV.pov(n, b.povId), slot = NV.slot(n, b.slotId);
+    const p = NV.plotline(n, b.plotlineId), pov = NV.pov(n, b.povId), slot = NV.timeOf(n, b);
     const row = list.createDiv('pw-orow');
     row.dataset.id = b.id;
     row.style.setProperty('--pw-color', p.color);
@@ -1709,8 +1953,44 @@ class PlotWeaverView extends ItemView {
     top.createSpan({ cls: 'pw-plot-chip', text: p.name });
     top.createSpan({ cls: 'pw-time-chip', text: slot ? slot.label : 'no story time yet' });
     if (jump) top.createSpan({ cls: 'pw-tag pw-tag-jump', text: '↺ earlier in story time' });
+    if (b.where === 'outline') top.createSpan({ cls: 'pw-tag pw-tag-where', text: 'outline only' });
     if (b.notePath) { const l = top.createSpan('pw-tag pw-link'); setIcon(l, 'file-text'); l.onclick = e => { e.stopPropagation(); this.plugin.openNote(n, b); }; }
+    const par = NV.parent(n, b);
+    if (par) body.createDiv({ cls: 'pw-parent-chip', text: `↳ part of ${par.title}` });
     if (b.summary) body.createDiv({ cls: 'pw-osummary', text: b.summary });
+    this.renderInfluences(body, n, b);
+    const more = row.createDiv('pw-icon-btn');
+    setIcon(more, 'more-horizontal');
+    more.onclick = e => { e.stopPropagation(); this.cardMenu(e, n, b); };
+    row.draggable = true;
+    row.addEventListener('dragstart', e => {
+      this.drag = { kind: 'beat', id: b.id, source: 'outline' };
+      if (e.dataTransfer) { e.dataTransfer.setData('text/plain', b.title); e.dataTransfer.effectAllowed = 'move'; }
+      setTimeout(() => row.addClass('pw-dragging'), 0);
+    });
+    row.addEventListener('dragend', () => this.endDrag());
+    row.addEventListener('dblclick', () => this.editBeat(b));
+    row.addEventListener('contextmenu', e => { e.preventDefault(); this.cardMenu(e, n, b); });
+  }
+
+  /** A card assigned to a Part: shown as that part's summary, not numbered as a scene. */
+  renderSummaryRow(list, n, b) {
+    const p = NV.plotline(n, b.plotlineId), slot = NV.timeOf(n, b);
+    const row = list.createDiv('pw-orow pw-orow-summary');
+    row.dataset.id = b.id;
+    row.style.setProperty('--pw-color', p.color);
+    setIcon(row.createDiv('pw-grip'), 'grip-vertical');
+    const ic = row.createDiv('pw-onum');
+    setIcon(ic, 'library');
+    const body = row.createDiv('pw-obody');
+    const top = body.createDiv('pw-otop');
+    top.createSpan({ cls: 'pw-off-label', text: 'Part summary' });
+    top.createSpan({ cls: 'pw-otitle', text: b.title });
+    top.createSpan({ cls: 'pw-plot-chip', text: p.name });
+    if (slot) top.createSpan({ cls: 'pw-time-chip', text: slot.label });
+    if (b.summary) body.createDiv({ cls: 'pw-osummary', text: b.summary });
+    const kids = NV.scenesOf(n, b);
+    if (kids.length) body.createDiv({ cls: 'pw-oinf', text: `Scenes: ${kids.map(k => k.title).join(' · ')}` });
     this.renderInfluences(body, n, b);
     const more = row.createDiv('pw-icon-btn');
     setIcon(more, 'more-horizontal');
@@ -1955,7 +2235,7 @@ class PlotWeaverSettingTab extends PluginSettingTab {
     new Setting(c).setName('Add Plot Weaver properties').setDesc('Add novel, plotline, POV, story time and chapter to the new note’s properties, alongside whatever your template has.')
       .addToggle(t => t.setValue(s.addProperties).onChange(v => { s.addProperties = v; this.plugin.requestSave(); }));
     const vars = c.createDiv('pw-muted pw-vars');
-    vars.setText('Template variables: {{title}} {{summary}} {{novel}} {{plotline}} {{pov}} {{when}} {{chapter}} {{offscreen}} {{status}} {{shapedBy}} {{leadsTo}} {{date}} {{time}} {{id}}. Anything else (e.g. Templater <% %> code) is left untouched.');
+    vars.setText('Template variables: {{title}} {{summary}} {{novel}} {{plotline}} {{pov}} {{when}} {{chapter}} {{part}} {{partOf}} {{offscreen}} {{status}} {{shapedBy}} {{leadsTo}} {{date}} {{time}} {{id}}. Anything else (e.g. Templater <% %> code) is left untouched.');
 
     c.createEl('h3', { text: 'Board' });
     new Setting(c).setName('Full screen fills the display').setDesc('When you turn on full screen, also make the Obsidian window full screen (desktop). Off: the board just fills the Obsidian window.')
@@ -2144,14 +2424,51 @@ class PlotWeaverPlugin extends Plugin {
     if (!count) { go(); return; }
     new ConfirmModal(this.app, 'Delete story-time event?', `Delete “${s.label}”? Its ${plural(count, 'event')} lose their story time. Those already in a chapter stay in it; the rest move to the Unplaced shelf.`, 'Delete', go).open();
   }
-  addChapter(n, index) {
-    new TextPromptModal(this.app, 'New chapter', 'Chapter title', `Chapter ${n.chapters.length + 1}`, title => {
-      n.chapters.splice(Math.max(0, Math.min(index, n.chapters.length)), 0, { id: uid(), title });
+  addChapter(n, index) { this.addSection(n, 'chapter', index); }
+  /** Add a chapter, part, prologue, interlude or epilogue. Prologues go first and epilogues last unless a position is given. */
+  addSection(n, kind, index, then) {
+    const info = SECTION_KINDS.find(k => k.key === kind) || SECTION_KINDS[2];
+    new TextPromptModal(this.app, `New ${info.label.toLowerCase()}`, 'Title', NV.defaultSectionTitle(n, info.key), title => {
+      let at = index;
+      if (at === null || at === undefined) at = info.key === 'prologue' ? 0 : n.chapters.length;
+      const sec = { id: uid(), title, kind: info.key };
+      n.chapters.splice(Math.max(0, Math.min(at, n.chapters.length)), 0, sec);
+      if (then) then(sec);
       this.commit();
     }).open();
   }
+  addSectionMenu(n, index, evt) {
+    const m = new Menu();
+    for (const k of SECTION_KINDS) {
+      m.addItem(it => it.setTitle(k.label).setIcon(k.icon).onClick(() => this.addSection(n, k.key, k.key === 'prologue' && index === n.chapters.length ? null : index)));
+    }
+    if (evt) m.showAtMouseEvent(evt);
+    else m.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 3 });
+  }
+  setSectionKind(n, sec, kind, after) {
+    const old = NV.kind(sec);
+    if (old === kind) return;
+    const info = SECTION_KINDS.find(k => k.key === kind);
+    const oldInfo = SECTION_KINDS.find(k => k.key === old);
+    // Swap a default-looking prefix ("Chapter 6: Two Lanterns") for the new kind's numbering ("Interlude 2: Two Lanterns"); keep custom titles.
+    const m = (sec.title || '').match(new RegExp(`^${oldInfo.label}(?:\\s+[0-9IVXLC]+)?(.*)$`, 'i'));
+    const base = NV.defaultSectionTitle(n, kind);
+    if (!sec.title) sec.title = base;
+    else if (m) sec.title = base + m[1];
+    sec.kind = kind;
+    this.commit();
+    if (after) after();
+  }
+  detachScene(n, b) {
+    const par = NV.parent(n, b);
+    if (par && !b.slotId) b.slotId = par.slotId;
+    if (b.where === 'outline') b.where = 'both';
+    b.parentId = null;
+    this.commit();
+    new Notice(`“${b.title}” now stands on its own${par ? ` (was part of “${par.title}”)` : ''}.`);
+  }
   renameChapter(n, ch) {
-    new TextPromptModal(this.app, 'Rename chapter', 'Title', ch.title, v => { ch.title = v; this.commit(); }).open();
+    new TextPromptModal(this.app, `Rename ${NV.kindInfo(ch).label.toLowerCase()}`, 'Title', ch.title, v => { ch.title = v; this.commit(); }).open();
   }
   deleteChapter(n, ch, after) {
     const count = n.beats.filter(b => b.chapterId === ch.id).length;
@@ -2162,7 +2479,8 @@ class PlotWeaverPlugin extends Plugin {
       if (after) after();
     };
     if (!count) { go(); return; }
-    new ConfirmModal(this.app, 'Delete chapter?', `Delete “${ch.title}”? Its ${plural(count, 'scene')} stay on the board in story time, just without a chapter.`, 'Delete chapter', go).open();
+    const label = NV.kindInfo(ch).label.toLowerCase();
+    new ConfirmModal(this.app, `Delete ${label}?`, `Delete “${ch.title}”? Its ${plural(count, 'card')} stay on the board in story time, just without a ${label}.`, `Delete ${label}`, go).open();
   }
   deleteBeat(n, b) {
     const go = () => { NV.remove(n, b.id); XN.purgeBeat(this.data.novels, b.id); this.commit(); new Notice(`Deleted “${b.title}”`); };
@@ -2183,13 +2501,15 @@ class PlotWeaverPlugin extends Plugin {
     }
   }
   noteVars(n, b) {
-    const p = NV.plotline(n, b.plotlineId), pov = NV.pov(n, b.povId), s = NV.slot(n, b.slotId);
+    const p = NV.plotline(n, b.plotlineId), pov = NV.pov(n, b.povId), s = NV.timeOf(n, b);
     const ch = NV.hasChapter(n, b) ? NV.chapter(n, b.chapterId) : null;
     const ref = x => (x.notePath ? `[[${x.notePath.replace(/\.md$/, '')}|${x.title}]]` : x.title);
     const now = new Date();
     return {
       title: b.title, summary: b.summary || '', novel: n.title,
       plotline: p ? p.name : '', pov: pov ? pov.name : '', when: s ? s.label : '', chapter: ch ? ch.title : '',
+      part: ch ? (NV.kind(ch) === 'part' ? ch.title : ((NV.partOf(n, ch.id) || {}).title || '')) : '',
+      partOf: (NV.parent(n, b) || {}).title || '',
       offscreen: String(!!b.offscreen), status: b.status, id: b.id,
       date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
       time: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
@@ -2318,13 +2638,21 @@ class PlotWeaverPlugin extends Plugin {
     }
     L.push('', '## Manuscript');
     const onscreen = NV.manuscript(n);
-    const nums = new Map(onscreen.map((b, i) => [b.id, i + 1]));
+    const nums = new Map(onscreen.filter(b => !NV.isSummary(n, b)).map((b, i) => [b.id, i + 1]));
+    const hasParts = n.chapters.some(c => NV.kind(c) === 'part');
     for (const g of NV.groups(n, NV.withOffscreen(n, onscreen))) {
       if (!g.items.length && !g.chapter) continue;
-      L.push('', `### ${g.chapter ? g.chapter.title : 'Not in a chapter yet'}`);
-      if (!g.items.length) L.push('*(empty)*');
-      for (const b of g.items) {
-        const p = NV.plotline(n, b.plotlineId), s = NV.slot(n, b.slotId);
+      const kind = g.chapter ? NV.kind(g.chapter) : null;
+      const level = hasParts && kind !== 'part' ? '####' : '###';
+      L.push('', `${level} ${g.chapter ? g.chapter.title : 'Not in a chapter yet'}`);
+      if (!g.items.length && kind !== 'part') L.push('*(empty)*');
+      const ordered = g.items.filter(b => NV.isSummary(n, b)).concat(g.items.filter(b => !NV.isSummary(n, b)));
+      for (const b of ordered) {
+        const p = NV.plotline(n, b.plotlineId), s = NV.timeOf(n, b);
+        if (NV.isSummary(n, b)) {
+          L.push(`> **${b.title}**${b.summary ? ` — ${one(b.summary)}` : ''}`);
+          continue;
+        }
         if (b.offscreen) {
           const t = XN.outgoing(novels, n, b).map(x => XN.name(n, x.toNovel, x.to) + (x.note ? ` (${one(x.note)})` : ''));
           L.push(`- *Meanwhile, off-screen (${s.label}, ${p.name}):* ${b.title}${t.length ? ` → ${t.join('; ')}` : ''}`);
@@ -2334,6 +2662,8 @@ class PlotWeaverPlugin extends Plugin {
         const bits = [p.name, pov ? `POV: ${pov.name}` : null, s ? `When: ${s.label}` : 'When: —'].filter(Boolean);
         L.push(`${nums.get(b.id)}. **${b.title}** — ${bits.join(' · ')}`);
         if (b.summary) L.push(`    ${one(b.summary)}`);
+        const par = NV.parent(n, b);
+        if (par) L.push(`    *Part of:* ${par.title}`);
         const inc = XN.incoming(novels, n, b.id);
         if (inc.length) L.push(`    *Shaped by:* ${inc.map(x => XN.name(n, x.fromNovel, x.from) + (x.from.offscreen ? ' (off-screen)' : '') + (x.note ? ` — ${one(x.note)}` : '')).join('; ')}`);
         const outs = XN.outgoing(novels, n, b);

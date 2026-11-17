@@ -9,6 +9,8 @@ An Obsidian plugin for outlining a novel with **several plotlines running at onc
   - **Chapters**: reading order. Scenes not yet assigned wait in a **No chapter yet** column.
 
   Drag cards between cells and reorder them within a cell. Drag row and column headers to reorder them.
+- **Parts, prologues, interludes and epilogues.** Sections can be Chapters, Parts, a Prologue, Interludes or an Epilogue. A Part groups the chapters after it, and a card placed in a Part becomes that part’s summary. Manage them in *Manage → Chapters & parts*, from the **Section** button, or from a heading’s ⋯ menu (“Make it a Part”…).
+- **Plan big, write small.** Each card can show in **Board and Outline**, **Board only** (big-picture planning or a summary) or **Outline only** (a manuscript scene that doesn’t need its own board card). **Break down into scenes…** splits a card into scene cards. The card becomes their summary on the board and lists its scenes; the scenes take its story time unless they have their own. You can attach or detach scenes at any time, so some cards can stay single scenes while others become summaries.
 - **Multiple POVs.** Each scene can have a POV character, shown as a coloured badge. The POV filter fades out the other characters’ scenes.
 - **Off-screen events.** Events that happen in the story world but aren’t on the page. They sit on their plotline, can influence other events, and appear in the Outline at their point in story time.
 - **Influences.** Link any event to the events it causes, with a note on how. Links are drawn as arrows on the board. Hover over a card to trace them and read the notes.
@@ -41,7 +43,8 @@ Put templates in your templates folder (default `Templates`; change it in the pl
 |---|---|
 | `{{title}}`, `{{summary}}` | The scene’s title and summary |
 | `{{novel}}`, `{{plotline}}`, `{{pov}}` | Novel, plotline, POV character |
-| `{{when}}`, `{{chapter}}` | Story-time event, chapter |
+| `{{when}}`, `{{chapter}}` | Story-time event, chapter or section |
+| `{{part}}`, `{{partOf}}` | The Part it falls in; the card it was broken out of |
 | `{{offscreen}}`, `{{status}}`, `{{id}}` | Flags and the scene’s Plot Weaver id |
 | `{{shapedBy}}`, `{{leadsTo}}` | Bullet lists of influence links, with their notes |
 | `{{date}}`, `{{time}}` | When the note was created |
